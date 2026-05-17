@@ -1,0 +1,8 @@
+{
+  "name": "looped-admin-stitch-export",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google/stitch-sdk": "^0.3.4"
+  }
+}

@@ -11,6 +11,7 @@ import 'package:looped_admin/feature/Inventory/presentation/cubit/inventory_adju
 import 'package:looped_admin/feature/Inventory/presentation/cubit/inventory_adjustments_list_state.dart';
 import 'package:looped_admin/feature/Inventory/presentation/inventory_adjustment_detail_screen.dart';
 import 'package:looped_admin/feature/Inventory/presentation/inventory_create_adjustment_screen.dart';
+import 'package:looped_admin/feature/Inventory/widget/inventory_adjustment_card.dart';
 import 'package:looped_admin/feature/Inventory/widget/inventory_colors.dart';
 import 'package:looped_admin/feature/Inventory/widget/inventory_gradient_action_button.dart';
 import 'package:looped_admin/feature/settings/widget/account_settings_app_bar.dart';
@@ -245,7 +246,7 @@ class _InventoryMainShell extends StatelessWidget {
                           );
                         }
                         final item = state.items[index];
-                        return _AdjustmentSummaryCard(
+                        return InventoryAdjustmentCard(
                           item: item,
                           onTap: () => _openAdjustmentDetail(context, item),
                         );
@@ -285,98 +286,6 @@ class _InventoryMainShell extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AdjustmentSummaryCard extends StatelessWidget {
-  const _AdjustmentSummaryCard({
-    required this.item,
-    required this.onTap,
-  });
-
-  final InventoryAdjustmentSummary item;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final stateLabel = item.state.isEmpty ? '—' : item.state;
-    return Material(
-      color: InventoryColors.cardSurface,
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      item.name,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: InventoryColors.primaryNavy,
-                        height: 1.25,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: InventoryColors.pageBackground,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      stateLabel,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: InventoryColors.primaryNavy,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                item.date,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: InventoryColors.subtitleGrey,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (item.locationName.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  item.locationName,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: InventoryColors.primaryNavy.withValues(alpha: 0.85),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                'inventory_adjustments_lines_count'.tr(
-                  namedArgs: {'count': '${item.linesCount}'},
-                ),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: InventoryColors.subtitleGrey,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

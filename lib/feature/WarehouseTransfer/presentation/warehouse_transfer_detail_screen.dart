@@ -56,7 +56,7 @@ class _WarehouseTransferDetailScreenState
     if (_isSubmitted && _detail.id > 0) {
       unawaited(_loadRoutes());
     }
-    if (_canEditRequestLines) {
+    if (_isDraft) {
       unawaited(_loadProducts());
     }
   }
@@ -104,7 +104,12 @@ class _WarehouseTransferDetailScreenState
     return key == 'submitted' || key.contains('submitted');
   }
 
-  /// Request still accepts product lines (API no longer uses `draft` only).
+  bool get _isDraft {
+    final key = _detail.state.toLowerCase().trim();
+    return key == 'draft' || key.contains('draft');
+  }
+
+  /// Request still accepts edits (submit, etc.) beyond draft-only line adds.
   bool get _canEditRequestLines {
     if (_detail.id <= 0 || _isSubmitted) return false;
     final key = _detail.state.toLowerCase().trim();
@@ -217,7 +222,7 @@ class _WarehouseTransferDetailScreenState
     final messenger = ScaffoldMessenger.of(context);
     try {
       final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
-      if (_pendingProductQuantities.isNotEmpty) {
+      if (_isDraft && _pendingProductQuantities.isNotEmpty) {
         final items = _buildAddLinesPayload(_pendingProductQuantities);
         if (items.isNotEmpty) {
           await repo.addRequestLines(
@@ -259,6 +264,7 @@ class _WarehouseTransferDetailScreenState
     Map<String, double> quantities, {
     List<ProductOption>? sourceProducts,
   }) async {
+    if (!_isDraft) return;
     final items = _buildAddLinesPayload(quantities);
     if (items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -350,7 +356,7 @@ class _WarehouseTransferDetailScreenState
   }
 
   Future<void> _openAddProductsSheet() async {
-    if (_isBusy || _productsLoading) return;
+    if (!_isDraft || _isBusy || _productsLoading) return;
     if (_productsError != null) {
       await _loadProducts();
       if (!mounted || _productsError != null) return;
@@ -457,12 +463,12 @@ class _WarehouseTransferDetailScreenState
 
   double get _listBottomInset {
     if (!_showBottomAction) return 0;
-    if (_canEditRequestLines) return 100;
+    if (_canEditRequestLines) return _isDraft ? 100 : 88;
     return 88;
   }
 
   bool get _canOpenAddProducts =>
-      _canEditRequestLines && !_isBusy && _productsError == null;
+      _isDraft && !_isBusy && _productsError == null;
 
   Widget? _buildBottomBar(double bottomInset) {
     if (!_showBottomAction) return null;
@@ -476,31 +482,40 @@ class _WarehouseTransferDetailScreenState
         ),
       );
     } else if (_canEditRequestLines) {
-      actions = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: InventoryGradientActionButton(
-              label: 'transfer_detail_add_products'.tr(),
-              icon: Icons.add_rounded,
-              onPressed: _openAddProductsSheet,
-              enabled: _canOpenAddProducts,
-              compact: true,
-              variant: InventoryActionButtonVariant.secondary,
+      if (_isDraft) {
+        actions = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: InventoryGradientActionButton(
+                label: 'transfer_detail_add_products'.tr(),
+                icon: Icons.add_rounded,
+                onPressed: _openAddProductsSheet,
+                enabled: _canOpenAddProducts,
+                compact: true,
+                variant: InventoryActionButtonVariant.secondary,
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: InventoryGradientActionButton(
-              label: 'transfer_detail_submit'.tr(),
-              icon: Icons.send_rounded,
-              onPressed: _onSubmit,
-              enabled: _canSubmit,
-              compact: true,
+            const SizedBox(width: 10),
+            Expanded(
+              child: InventoryGradientActionButton(
+                label: 'transfer_detail_submit'.tr(),
+                icon: Icons.send_rounded,
+                onPressed: _onSubmit,
+                enabled: _canSubmit,
+                compact: true,
+              ),
             ),
-          ),
-        ],
-      );
+          ],
+        );
+      } else {
+        actions = InventoryGradientActionButton(
+          label: 'transfer_detail_submit'.tr(),
+          icon: Icons.send_rounded,
+          onPressed: _onSubmit,
+          enabled: _canSubmit,
+        );
+      }
     } else if (_showDualSubmittedActions) {
       actions = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -644,7 +659,7 @@ class _WarehouseTransferDetailScreenState
               ],
             ),
             const SizedBox(height: 12),
-            if (_canEditRequestLines) ...[
+            if (_isDraft) ...[
               _DraftAddProductsBanner(
                 isLoading: _productsLoading,
                 errorMessage: _productsError,
@@ -655,7 +670,7 @@ class _WarehouseTransferDetailScreenState
               ),
               const SizedBox(height: 12),
             ],
-            if (_pendingProducts.isNotEmpty) ...[
+            if (_isDraft && _pendingProducts.isNotEmpty) ...[
               _DetailPendingProductsList(
                 theme: theme,
                 products: _pendingProducts,

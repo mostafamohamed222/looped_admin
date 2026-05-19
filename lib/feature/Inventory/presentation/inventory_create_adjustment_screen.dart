@@ -14,7 +14,6 @@ import 'package:looped_admin/feature/Inventory/widget/inventory_colors.dart';
 import 'package:looped_admin/feature/Inventory/widget/inventory_gradient_action_button.dart';
 import 'package:looped_admin/feature/Inventory/widget/inventory_type_selector.dart';
 import 'package:looped_admin/feature/Inventory/widget/searchable_warehouse_field.dart';
-import 'package:looped_admin/feature/Inventory/widget/warehouse_summary_card.dart';
 import 'package:looped_admin/feature/settings/widget/account_settings_app_bar.dart';
 
 /// Create a new inventory adjustment (name, warehouse, count type, optional products).
@@ -201,6 +200,7 @@ class _InventoryCreateAdjustmentView extends StatelessWidget {
                       onSelected: cubit.selectWarehouse,
                       enabled: state.isWarehouseReady,
                       isLoading: state.isWarehouseLoading,
+                      compact: true,
                     ),
                     if (state.warehouseLoadStatus == WarehouseLoadStatus.failure &&
                         state.warehouses.isNotEmpty)
@@ -208,10 +208,6 @@ class _InventoryCreateAdjustmentView extends StatelessWidget {
                         message: _warehouseError(state.warehouseErrorMessage),
                         onRetry: cubit.retryWarehouses,
                       ),
-                    if (state.selectedWarehouse != null) ...[
-                      const SizedBox(height: 12),
-                      WarehouseSummaryCard(warehouse: state.selectedWarehouse!),
-                    ],
                   ],
                 ),
               ),
@@ -234,7 +230,7 @@ class _InventoryCreateAdjustmentView extends StatelessWidget {
                       child: state.selectedType == InventoryCountType.full
                           ? Padding(
                               key: const ValueKey('full-zero-options'),
-                              padding: const EdgeInsets.only(top: 14),
+                              padding: const EdgeInsets.only(top: 10),
                               child: FullCountZeroStockOptions(
                                 includeZeroQuantityProducts:
                                     state.includeZeroQuantityInFullCount,
@@ -245,16 +241,17 @@ class _InventoryCreateAdjustmentView extends StatelessWidget {
                           : const SizedBox.shrink(key: ValueKey('no-full-zero')),
                     ),
                     if (state.selectedType == InventoryCountType.singleProduct) ...[
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       Text(
                         'inventory_section_manual_products'.tr(),
-                        style: theme.textTheme.labelLarge?.copyWith(
+                        style: theme.textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: InventoryColors.subtitleGrey,
-                          letterSpacing: 0.3,
+                          letterSpacing: 0.2,
+                          fontSize: 11.5,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       _CreateManualProductPicker(theme: theme, state: state),
                     ],
                   ],

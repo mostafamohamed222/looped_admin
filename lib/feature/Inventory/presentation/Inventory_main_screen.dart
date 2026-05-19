@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:looped_admin/core/di/injection.dart';
 import 'package:looped_admin/core/data_scource/remote/dio_consumer.dart';
+import 'package:looped_admin/core/widgets/filterable_list_toolbar.dart';
 import 'package:looped_admin/feature/Inventory/data/inventory_count_repository_impl.dart';
 import 'package:looped_admin/feature/Inventory/domain/inventory_adjustment_summary.dart';
 import 'package:looped_admin/feature/Inventory/presentation/cubit/inventory_adjustments_list_cubit.dart';
@@ -31,8 +32,64 @@ class InventoryMainScreen extends StatelessWidget {
   }
 }
 
-class _InventoryMainShell extends StatelessWidget {
+List<InventoryAdjustmentSummary> _filterAdjustmentsByState(
+  List<InventoryAdjustmentSummary> items,
+  String? selectedStateKey,
+) {
+  if (selectedStateKey == null) return items;
+  return items
+      .where(
+        (item) => item.state.toLowerCase().trim() == selectedStateKey,
+      )
+      .toList();
+}
+
+List<InventoryAdjustmentSummary> _searchAdjustments(
+  List<InventoryAdjustmentSummary> items,
+  String query,
+) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return items;
+  return items.where((item) {
+    if (item.name.toLowerCase().contains(q)) return true;
+    if (item.inventoryId.toString().contains(q)) return true;
+    return false;
+  }).toList();
+}
+
+class _InventoryMainShell extends StatefulWidget {
   const _InventoryMainShell();
+
+  @override
+  State<_InventoryMainShell> createState() => _InventoryMainShellState();
+}
+
+class _InventoryMainShellState extends State<_InventoryMainShell> {
+  String? _selectedStateKey;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _clearListFilters() {
+    setState(() {
+      _selectedStateKey = null;
+      _searchQuery = '';
+      _searchController.clear();
+    });
+  }
+
+  String _emptyResultsMessage({required bool hasSearch, required bool hasState}) {
+    if (hasSearch && hasState) {
+      return 'inventory_adjustments_search_filter_empty'.tr();
+    }
+    if (hasSearch) return 'inventory_adjustments_search_empty'.tr();
+    return 'inventory_adjustments_filter_empty'.tr();
+  }
 
   String _listError(String? raw) {
     if (raw == null || raw.isEmpty) {
@@ -174,8 +231,22 @@ class _InventoryMainShell extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: BlocBuilder<InventoryAdjustmentsListCubit,
+              child: BlocConsumer<InventoryAdjustmentsListCubit,
                   InventoryAdjustmentsListState>(
+                listenWhen: (previous, current) =>
+                    previous.items != current.items,
+                listener: (context, state) {
+                  if (_selectedStateKey == null) return;
+                  final base = _searchAdjustments(state.items, _searchQuery);
+                  final available = distinctStateLabels(
+                    base.map((item) => item.state),
+                  )
+                      .map((s) => s.toLowerCase().trim())
+                      .toSet();
+                  if (!available.contains(_selectedStateKey)) {
+                    setState(() => _selectedStateKey = null);
+                  }
+                },
                 builder: (context, state) {
                   if (state.status == InventoryAdjustmentsListStatus.loading &&
                       state.items.isEmpty) {
@@ -220,38 +291,149 @@ class _InventoryMainShell extends StatelessWidget {
                       ),
                     );
                   }
-                  return RefreshIndicator(
-                    color: InventoryColors.primaryNavy,
-                    onRefresh: () =>
-                        context.read<InventoryAdjustmentsListCubit>().load(),
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      itemCount: state.items.length +
-                          (state.status ==
-                                  InventoryAdjustmentsListStatus.failure
-                              ? 1
-                              : 0),
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        if (index == state.items.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(
-                              _listError(state.errorMessage),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: InventoryColors.dangerText,
-                                fontWeight: FontWeight.w600,
+
+                  final searchFiltered =
+                      _searchAdjustments(state.items, _searchQuery);
+                  final filterStates = distinctStateLabels(
+                    searchFiltered.map((item) => item.state),
+                  );
+                  final filteredItems = _filterAdjustmentsByState(
+                    searchFiltered,
+                    _selectedStateKey,
+                  );
+                  final hasSearch = _searchQuery.trim().isNotEmpty;
+                  final hasStateFilter = _selectedStateKey != null;
+                  final hasActiveFilters = hasSearch || hasStateFilter;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FilterableListToolbar(
+                        searchController: _searchController,
+                        searchQuery: _searchQuery,
+                        onSearchChanged: (value) {
+                          setState(() => _searchQuery = value);
+                          if (_selectedStateKey == null) return;
+                          final available = distinctStateLabels(
+                            _searchAdjustments(state.items, value)
+                                .map((item) => item.state),
+                          )
+                              .map((s) => s.toLowerCase().trim())
+                              .toSet();
+                          if (!available.contains(_selectedStateKey)) {
+                            _selectedStateKey = null;
+                          }
+                        },
+                        states: filterStates,
+                        selectedStateKey: _selectedStateKey,
+                        onStateSelected: (key) =>
+                            setState(() => _selectedStateKey = key),
+                        countFor: (stateKey) {
+                          if (stateKey == null) return searchFiltered.length;
+                          return searchFiltered
+                              .where(
+                                (item) =>
+                                    item.state.toLowerCase().trim() ==
+                                    stateKey,
+                              )
+                              .length;
+                        },
+                        searchHintKey: 'inventory_adjustments_search_hint',
+                        filterByStatusKey: 'inventory_filter_by_status',
+                        filterAllKey: 'inventory_filter_all',
+                        clearSearchTooltipKey: 'inventory_filter_clear',
+                        stateStyleFor: InventoryAdjustmentStateStyle.forState,
+                      ),
+                      Expanded(
+                        child: filteredItems.isEmpty
+                            ? RefreshIndicator(
+                                color: InventoryColors.primaryNavy,
+                                onRefresh: () => context
+                                    .read<InventoryAdjustmentsListCubit>()
+                                    .load(),
+                                child: ListView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(24, 48, 24, 24),
+                                  children: [
+                                    Icon(
+                                      hasSearch
+                                          ? Icons.search_off_rounded
+                                          : Icons.filter_list_off_rounded,
+                                      size: 52,
+                                      color: InventoryColors.subtitleGrey
+                                          .withValues(alpha: 0.75),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _emptyResultsMessage(
+                                        hasSearch: hasSearch,
+                                        hasState: hasStateFilter,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                      style:
+                                          theme.textTheme.bodyLarge?.copyWith(
+                                        color: InventoryColors.primaryNavy,
+                                        fontWeight: FontWeight.w600,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                    if (hasActiveFilters) ...[
+                                      const SizedBox(height: 16),
+                                      Center(
+                                        child: TextButton(
+                                          onPressed: _clearListFilters,
+                                          child: Text(
+                                            'inventory_filter_clear_all'.tr(),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              )
+                            : RefreshIndicator(
+                                color: InventoryColors.primaryNavy,
+                                onRefresh: () => context
+                                    .read<InventoryAdjustmentsListCubit>()
+                                    .load(),
+                                child: ListView.separated(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                                  itemCount: filteredItems.length +
+                                      (state.status ==
+                                              InventoryAdjustmentsListStatus
+                                                  .failure
+                                          ? 1
+                                          : 0),
+                                  separatorBuilder: (_, _) =>
+                                      const SizedBox(height: 10),
+                                  itemBuilder: (context, index) {
+                                    if (index == filteredItems.length) {
+                                      return Padding(
+                                        padding:
+                                            const EdgeInsets.only(bottom: 8),
+                                        child: Text(
+                                          _listError(state.errorMessage),
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                            color: InventoryColors.dangerText,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    final item = filteredItems[index];
+                                    return InventoryAdjustmentCard(
+                                      item: item,
+                                      onTap: () =>
+                                          _openAdjustmentDetail(context, item),
+                                    );
+                                  },
+                                ),
                               ),
-                            ),
-                          );
-                        }
-                        final item = state.items[index];
-                        return InventoryAdjustmentCard(
-                          item: item,
-                          onTap: () => _openAdjustmentDetail(context, item),
-                        );
-                      },
-                    ),
+                      ),
+                    ],
                   );
                 },
               ),

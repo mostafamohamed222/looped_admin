@@ -15,31 +15,37 @@ class InventoryTypeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _TypeCard(
-          title: 'inventory_type_full_title'.tr(),
-          description: 'inventory_type_full_desc'.tr(),
-          icon: Icons.fact_check_rounded,
-          selected: selected == InventoryCountType.full,
-          onTap: () => onChanged(InventoryCountType.full),
-        ),
-        const SizedBox(height: 12),
-        _TypeCard(
-          title: 'inventory_type_single_title'.tr(),
-          description: 'inventory_type_single_desc'.tr(),
-          icon: Icons.qr_code_2_rounded,
-          selected: selected == InventoryCountType.singleProduct,
-          onTap: () => onChanged(InventoryCountType.singleProduct),
-        ),
-      ],
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _CompactTypeCard(
+              title: 'inventory_type_full_title'.tr(),
+              description: 'inventory_type_full_desc'.tr(),
+              icon: Icons.fact_check_rounded,
+              selected: selected == InventoryCountType.full,
+              onTap: () => onChanged(InventoryCountType.full),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _CompactTypeCard(
+              title: 'inventory_type_single_title'.tr(),
+              description: 'inventory_type_single_desc'.tr(),
+              icon: Icons.playlist_add_check_rounded,
+              selected: selected == InventoryCountType.singleProduct,
+              onTap: () => onChanged(InventoryCountType.singleProduct),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _TypeCard extends StatelessWidget {
-  const _TypeCard({
+class _CompactTypeCard extends StatelessWidget {
+  const _CompactTypeCard({
     required this.title,
     required this.description,
     required this.icon,
@@ -56,84 +62,103 @@ class _TypeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        color: selected ? InventoryColors.accentBlueSoft : InventoryColors.cardSurface,
-        borderRadius: BorderRadius.circular(16),
+        color: selected
+            ? InventoryColors.accentBlueSoft.withValues(alpha: 0.55)
+            : InventoryColors.pageBackground,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: selected ? InventoryColors.accentBlue : InventoryColors.borderSubtle,
-          width: selected ? 2 : 1,
+          color: selected
+              ? InventoryColors.accentBlue.withValues(alpha: 0.38)
+              : InventoryColors.borderSubtle.withValues(alpha: 0.85),
+          width: selected ? 1.2 : 1,
         ),
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color: InventoryColors.accentBlue.withValues(alpha: 0.12),
-                  blurRadius: 18,
-                  offset: const Offset(0, 8),
-                ),
-              ]
-            : null,
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           onTap: onTap,
+          splashColor: InventoryColors.accentBlue.withValues(alpha: 0.1),
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 9),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? InventoryColors.accentBlue
-                        : InventoryColors.tonalIconBg,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: selected ? Colors.white : InventoryColors.primaryNavy,
-                    size: 26,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: InventoryColors.primaryNavy,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? InventoryColors.accentBlue
+                            : InventoryColors.tonalIconBg,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 17,
+                        color: selected
+                            ? Colors.white
+                            : InventoryColors.primaryNavy.withValues(alpha: 0.75),
+                      ),
+                    ),
+                    const Spacer(),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: selected
+                            ? InventoryColors.accentBlue
+                            : Colors.transparent,
+                        border: Border.all(
+                          color: selected
+                              ? InventoryColors.accentBlue
+                              : InventoryColors.borderSubtle,
+                          width: 1.2,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        description,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: InventoryColors.subtitleGrey,
-                          height: 1.35,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+                      child: selected
+                          ? const Icon(
+                              Icons.check_rounded,
+                              size: 12,
+                              color: Colors.white,
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: InventoryColors.primaryNavy,
+                    fontSize: 12,
+                    height: 1.2,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_off_rounded,
-                  color: selected
-                      ? InventoryColors.accentBlue
-                      : InventoryColors.subtitleGrey,
-                  size: 26,
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: InventoryColors.subtitleGrey,
+                    height: 1.25,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 10,
+                  ),
                 ),
               ],
             ),

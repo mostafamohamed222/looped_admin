@@ -3,6 +3,8 @@ import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_create_reque
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_location_option.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_detail.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_summary.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_picking_detail.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_transfers.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_route_option.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_warehouse_option.dart';
 
@@ -12,6 +14,22 @@ abstract class WarehouseTransferRepository {
 
   /// Single request with lines (`get_request_details`).
   Future<StockRequestDetail> fetchRequestDetails({required int requestOrderId});
+
+  /// Pickings / transfers linked to a request (`get_request_transfers`).
+  Future<StockRequestTransfers> fetchRequestTransfers({
+    required int requestOrderId,
+  });
+
+  /// Single stock picking / transfer (`get_transfer_details`).
+  Future<StockPickingDetail> fetchTransferDetails({
+    required int transferId,
+  });
+
+  /// Process / validate transfer quantities (`process_transfer`).
+  Future<void> processTransfer({
+    required int transferId,
+    required List<Map<String, dynamic>> lines,
+  });
 
   /// Warehouses for create flow (`get_warehouses`).
   Future<List<StockWarehouseOption>> fetchStockWarehouses();

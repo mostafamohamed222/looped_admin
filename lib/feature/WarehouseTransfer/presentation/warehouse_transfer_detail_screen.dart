@@ -12,6 +12,7 @@ import 'package:looped_admin/feature/WarehouseTransfer/data/warehouse_transfer_r
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_detail.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_line.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_route_option.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/presentation/warehouse_request_transfers_screen.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/widget/stock_request_card.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/widget/transfer_searchable_picker_field.dart';
 
@@ -21,6 +22,8 @@ enum WarehouseTransferDetailResult {
   routeSaved,
   confirmed,
   linesAdded,
+  /// Picking / transfer flow changed data (e.g. `process_transfer`).
+  updated,
 }
 
 class WarehouseTransferDetailScreen extends StatefulWidget {
@@ -46,6 +49,7 @@ class _WarehouseTransferDetailScreenState
   bool _productsLoading = false;
   String? _productsError;
   bool _linesWereUpdated = false;
+  bool _transfersChanged = false;
   Map<String, double> _pendingProductQuantities = {};
   List<ProductOption> _pendingProducts = [];
 
@@ -108,6 +112,17 @@ class _WarehouseTransferDetailScreenState
     final key = _detail.state.toLowerCase().trim();
     return key == 'draft' || key.contains('draft');
   }
+
+  bool get _isOpen {
+    final key = _detail.state.toLowerCase().trim();
+    return key == 'open' || key.contains('open');
+  }
+
+  String get _submitActionLabelKey =>
+      _isOpen ? 'transfer_detail_go_to_transfer' : 'transfer_detail_submit';
+
+  IconData get _submitActionIcon =>
+      _isOpen ? Icons.local_shipping_outlined : Icons.send_rounded;
 
   /// Request still accepts edits (submit, etc.) beyond draft-only line adds.
   bool get _canEditRequestLines {
@@ -216,8 +231,46 @@ class _WarehouseTransferDetailScreenState
     return fallbackKey.tr();
   }
 
+  Future<void> _reloadDetailFromServer() async {
+    if (_detail.id <= 0) return;
+    try {
+      final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
+      final updated =
+          await repo.fetchRequestDetails(requestOrderId: _detail.id);
+      if (!mounted) return;
+      setState(() => _detail = updated);
+    } catch (_) {
+      // Keep showing last loaded detail if refresh fails.
+    }
+  }
+
+  Future<void> _onGoToTransfers() async {
+    if (!_isOpen || _detail.id <= 0 || _isBusy) return;
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => WarehouseRequestTransfersScreen(
+          requestOrderId: _detail.id,
+          requestName: _detail.name,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _reloadDetailFromServer();
+    if (changed == true) {
+      setState(() => _transfersChanged = true);
+    }
+  }
+
+  void _onPrimaryAction() {
+    if (_isOpen) {
+      unawaited(_onGoToTransfers());
+    } else {
+      unawaited(_onSubmit());
+    }
+  }
+
   Future<void> _onSubmit() async {
-    if (!_canSubmit) return;
+    if (!_canSubmit || _isOpen) return;
     setState(() => _actionLoading = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -455,17 +508,15 @@ class _WarehouseTransferDetailScreenState
       Navigator.of(context).pop(WarehouseTransferDetailResult.linesAdded);
       return;
     }
+    if (_transfersChanged) {
+      Navigator.of(context).pop(WarehouseTransferDetailResult.updated);
+      return;
+    }
     Navigator.of(context).pop();
   }
 
   bool get _showBottomAction =>
       _detail.id > 0 && (_canEditRequestLines || _isSubmitted);
-
-  double get _listBottomInset {
-    if (!_showBottomAction) return 0;
-    if (_canEditRequestLines) return _isDraft ? 100 : 88;
-    return 88;
-  }
 
   bool get _canOpenAddProducts =>
       _isDraft && !_isBusy && _productsError == null;
@@ -499,9 +550,9 @@ class _WarehouseTransferDetailScreenState
             const SizedBox(width: 10),
             Expanded(
               child: InventoryGradientActionButton(
-                label: 'transfer_detail_submit'.tr(),
-                icon: Icons.send_rounded,
-                onPressed: _onSubmit,
+                label: _submitActionLabelKey.tr(),
+                icon: _submitActionIcon,
+                onPressed: _onPrimaryAction,
                 enabled: _canSubmit,
                 compact: true,
               ),
@@ -510,9 +561,9 @@ class _WarehouseTransferDetailScreenState
         );
       } else {
         actions = InventoryGradientActionButton(
-          label: 'transfer_detail_submit'.tr(),
-          icon: Icons.send_rounded,
-          onPressed: _onSubmit,
+          label: _submitActionLabelKey.tr(),
+          icon: _submitActionIcon,
+          onPressed: _onPrimaryAction,
           enabled: _canSubmit,
         );
       }
@@ -610,12 +661,7 @@ class _WarehouseTransferDetailScreenState
         ),
         bottomNavigationBar: _buildBottomBar(bottomInset),
         body: ListView(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            0,
-            20,
-            28 + _listBottomInset,
-          ),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
           children: [
             _RequestSummaryCard(detail: _detail, stateStyle: stateStyle),
             if (_isSubmitted && _detail.id > 0) ...[

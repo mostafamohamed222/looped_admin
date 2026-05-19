@@ -130,4 +130,9 @@ class EndPoints {
   static const String stockGetRoutes = "/api/v1/stock/get_routes";
   static const String stockSetRoute = "/api/v1/stock/set_route";
   static const String stockConfirmRequest = "/api/v1/stock/confirm_request";
+  static const String stockGetRequestTransfers =
+      "/api/v1/stock/get_request_transfers";
+  static const String stockGetTransferDetails =
+      "/api/v1/get_transfer_details";
+  static const String stockProcessTransfer = "/api/v1/process_transfer";
 }

@@ -3,9 +3,13 @@ import 'package:looped_admin/core/data_scource/remote/end_points.dart';
 import 'package:looped_admin/feature/Inventory/domain/product_option.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_create_request_result.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_location_option.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_picking_detail.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_picking_move_line.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_picking_summary.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_detail.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_line.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_summary.dart';
+import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_request_transfers.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_route_option.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/stock_warehouse_option.dart';
 import 'package:looped_admin/feature/WarehouseTransfer/domain/warehouse_transfer_repository.dart';
@@ -79,6 +83,120 @@ class WarehouseTransferRepositoryImpl implements WarehouseTransferRepository {
       throw const FormatException('transfer_request_details_invalid_body');
     }
     return detail;
+  }
+
+  @override
+  Future<StockRequestTransfers> fetchRequestTransfers({
+    required int requestOrderId,
+  }) async {
+    final dynamic response = await _dio.post(
+      EndPoints.stockGetRequestTransfers,
+      body: <String, dynamic>{
+        'jsonrpc': '2.0',
+        'params': <String, dynamic>{
+          'request_order_id': requestOrderId,
+        },
+      },
+    );
+    _ensureActionRpcOk(
+      response,
+      invalidResponse: 'transfer_request_transfers_invalid_response',
+      missingResult: 'transfer_request_transfers_missing_result',
+      badStatus: 'transfer_request_transfers_bad_status',
+    );
+    final map = response as Map<String, dynamic>;
+    final innerRaw = map['result'];
+    if (innerRaw is! Map) {
+      throw const FormatException('transfer_request_transfers_missing_result');
+    }
+    final inner = Map<String, dynamic>.from(innerRaw);
+    final bodyRaw = inner['body'];
+    if (bodyRaw is! Map) {
+      throw const FormatException('transfer_request_transfers_missing_body');
+    }
+    final body = Map<String, dynamic>.from(bodyRaw);
+    final requestRaw = body['request_order'];
+    if (requestRaw is! Map) {
+      throw const FormatException('transfer_request_transfers_missing_body');
+    }
+    final requestOrder = _mapStockRequestRow(requestRaw);
+    if (requestOrder == null) {
+      throw const FormatException('transfer_request_transfers_invalid_body');
+    }
+    final transfers = <StockPickingSummary>[];
+    final transfersRaw = body['transfers'];
+    if (transfersRaw is List<dynamic>) {
+      for (final raw in transfersRaw) {
+        final picking = _mapStockPickingRow(raw);
+        if (picking != null) transfers.add(picking);
+      }
+    }
+    final pickingCount = _asInt(body['picking_count']) ?? transfers.length;
+    return StockRequestTransfers(
+      requestOrder: requestOrder,
+      transfers: transfers,
+      pickingCount: pickingCount,
+    );
+  }
+
+  @override
+  Future<StockPickingDetail> fetchTransferDetails({
+    required int transferId,
+  }) async {
+    final dynamic response = await _dio.post(
+      EndPoints.stockGetTransferDetails,
+      body: <String, dynamic>{
+        'jsonrpc': '2.0',
+        'params': <String, dynamic>{
+          'transfer_id': transferId,
+        },
+      },
+    );
+    _ensureActionRpcOk(
+      response,
+      invalidResponse: 'transfer_picking_detail_invalid_response',
+      missingResult: 'transfer_picking_detail_missing_result',
+      badStatus: 'transfer_picking_detail_bad_status',
+    );
+    final map = response as Map<String, dynamic>;
+    final innerRaw = map['result'];
+    if (innerRaw is! Map) {
+      throw const FormatException('transfer_picking_detail_missing_result');
+    }
+    final inner = Map<String, dynamic>.from(innerRaw);
+    final bodyRaw = inner['body'];
+    if (bodyRaw is! Map) {
+      throw const FormatException('transfer_picking_detail_missing_body');
+    }
+    final detail =
+        _mapStockPickingDetail(Map<String, dynamic>.from(bodyRaw));
+    if (detail == null) {
+      throw const FormatException('transfer_picking_detail_invalid_body');
+    }
+    return detail;
+  }
+
+  @override
+  Future<void> processTransfer({
+    required int transferId,
+    required List<Map<String, dynamic>> lines,
+  }) async {
+    final dynamic response = await _dio.post(
+      EndPoints.stockProcessTransfer,
+      body: <String, dynamic>{
+        'jsonrpc': '2.0',
+        'params': <String, dynamic>{
+          'transfer_id': transferId,
+          'lines': lines,
+        },
+      },
+    );
+    _ensureActionRpcOk(
+      response,
+      invalidResponse: 'transfer_picking_process_invalid_response',
+      missingResult: 'transfer_picking_process_missing_result',
+      badStatus: 'transfer_picking_process_bad_status',
+    );
   }
 
   @override
@@ -454,6 +572,66 @@ class WarehouseTransferRepositoryImpl implements WarehouseTransferRepository {
     );
   }
 
+  StockPickingDetail? _mapStockPickingDetail(Map<String, dynamic> m) {
+    final summary = _mapStockPickingRow(m);
+    if (summary == null) return null;
+    final moveLines = <StockPickingMoveLine>[];
+    final linesRaw = m['move_lines'];
+    if (linesRaw is List<dynamic>) {
+      for (final raw in linesRaw) {
+        final line = _mapStockPickingMoveLine(raw);
+        if (line != null) moveLines.add(line);
+      }
+    }
+    return StockPickingDetail(summary: summary, moveLines: moveLines);
+  }
+
+  StockPickingMoveLine? _mapStockPickingMoveLine(dynamic raw) {
+    if (raw is! Map) return null;
+    final m = Map<String, dynamic>.from(raw);
+    final id = _asInt(m['move_id']) ?? _asInt(m['id']);
+    if (id == null) return null;
+    return StockPickingMoveLine(
+      id: id,
+      productId: _asIntOrZero(m['product_id']),
+      productName: _asString(m['product_name']),
+      demand: _asDouble(m['demand']),
+      quantityDone: _asDouble(m['quantity_done']),
+      productUomId: _asIntOrZero(m['product_uom_id']),
+      productUomName: _asString(m['product_uom_name']),
+      state: _asString(m['state']),
+      branchName: _asDisplayString(m['branch_name']),
+      brandName: _asDisplayString(m['brand_name']),
+    );
+  }
+
+  StockPickingSummary? _mapStockPickingRow(dynamic raw) {
+    if (raw is! Map) return null;
+    final m = Map<String, dynamic>.from(raw);
+    final id = _asInt(m['id']);
+    if (id == null) return null;
+    return StockPickingSummary(
+      id: id,
+      name: _asString(m['name']),
+      origin: _asDisplayString(m['origin']),
+      scheduledDate: _asString(m['scheduled_date']),
+      state: _asString(m['state']),
+      stateLabel: _asString(m['state_label']),
+      partnerName: _asDisplayString(m['partner_name']),
+      pickingTypeId: _asIntOrZero(m['picking_type_id']),
+      pickingTypeName: _asString(m['picking_type_name']),
+      sourceLocationId: _asIntOrZero(m['source_location_id']),
+      sourceLocationName: _asString(m['source_location_name']),
+      destinationLocationId: _asIntOrZero(m['destination_location_id']),
+      destinationLocationName: _asString(m['destination_location_name']),
+      companyId: _asIntOrZero(m['company_id']),
+      companyName: _asString(m['company_name']),
+      linesCount: _asInt(m['lines_count']) ?? 0,
+      branchName: _asDisplayString(m['branch_name']),
+      brandName: _asDisplayString(m['brand_name']),
+    );
+  }
+
   StockRequestSummary? _mapStockRequestRow(dynamic raw) {
     if (raw is! Map) return null;
     final m = Map<String, dynamic>.from(raw);
@@ -482,6 +660,11 @@ class WarehouseTransferRepositoryImpl implements WarehouseTransferRepository {
       _asInt(m['request_order_id']) ?? _asInt(m['id']) ?? 0;
 
   String _asString(dynamic v) => (v ?? '').toString().trim();
+
+  String _asDisplayString(dynamic v) {
+    if (v == null || v == false) return '';
+    return v.toString().trim();
+  }
 
   int _asIntOrZero(dynamic v) => _asInt(v) ?? 0;
 

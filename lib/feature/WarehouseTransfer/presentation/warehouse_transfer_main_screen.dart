@@ -176,18 +176,19 @@ class _WarehouseTransferMainShellState extends State<_WarehouseTransferMainShell
           builder: (_) => WarehouseTransferDetailScreen(detail: detail),
         ),
       );
-      if (result != null && context.mounted) {
-        await context.read<WarehouseTransferListCubit>().load();
-        if (!context.mounted) return;
-        final messageKey = switch (result) {
-          WarehouseTransferDetailResult.submitted => 'transfer_submit_success',
-          WarehouseTransferDetailResult.routeSaved =>
-            'transfer_route_save_success',
-          WarehouseTransferDetailResult.confirmed =>
-            'transfer_confirm_success',
-          WarehouseTransferDetailResult.linesAdded =>
+      if (!context.mounted) return;
+      await context.read<WarehouseTransferListCubit>().load();
+      if (!context.mounted) return;
+      final messageKey = switch (result) {
+        WarehouseTransferDetailResult.submitted => 'transfer_submit_success',
+        WarehouseTransferDetailResult.routeSaved => 'transfer_route_save_success',
+        WarehouseTransferDetailResult.confirmed => 'transfer_confirm_success',
+        WarehouseTransferDetailResult.linesAdded =>
             'transfer_detail_add_lines_success',
-        };
+        WarehouseTransferDetailResult.updated => null,
+        null => null,
+      };
+      if (messageKey != null) {
         messenger.showSnackBar(
           SnackBar(
             content: Text(messageKey.tr()),

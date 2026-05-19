@@ -63,6 +63,10 @@ class DioConsumer extends ApiConsumer {
     client.options.headers.addAll({"Cookie": session});
   }
 
+  void clearSession() {
+    client.options.headers.remove('Cookie');
+  }
+
   @override
   Future get(String path,
       {dynamic body,

@@ -172,6 +172,16 @@ Future<String> _fetchDeviceIdentifier() async {
     await getIt<ObjectBoxHelper>().put('userId', uId);
   }
 
+  Future<void> logout() async {
+    final box = getIt<ObjectBoxHelper>();
+    await box.clear('userSessionId');
+    await box.clear('userDomain');
+    await box.clear('userId');
+    dioConsumer.clearSession();
+    isRememberMe = false;
+    emit(AuthInitial());
+  }
+
 
   /// يستعيد الجلسة من التخزين المحلي (تذكرني) ويطبّق [baseUrl] والـ cookie ثم [AuthSuccess].
   Future<void> checkIfUserLogin() async {

@@ -9,6 +9,7 @@ import 'package:looped_admin/feature/settings/widget/assistant_learning_card.dar
 import 'package:looped_admin/feature/settings/widget/language_preferences_card.dart';
 import 'package:looped_admin/feature/settings/widget/notification_settings_card.dart';
 import 'package:looped_admin/feature/settings/widget/profile_settings_card.dart';
+import 'package:looped_admin/feature/settings/widget/settings_logout_button.dart';
 
 class AccountSettingsPage extends StatefulWidget {
   const AccountSettingsPage({super.key});
@@ -136,6 +137,10 @@ class _AccountSettingsPageState extends State<AccountSettingsPage> {
                         onChatHistory: () {},
                         onHelpFab: () {},
                       ),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 20, 16, 0),
+                      child: SettingsLogoutButton(),
                     ),
                   ],
                 ),

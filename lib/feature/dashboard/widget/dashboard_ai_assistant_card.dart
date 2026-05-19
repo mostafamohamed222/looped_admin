@@ -2,7 +2,7 @@ import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:flutter/material.dart';
 import 'package:looped_admin/feature/dashboard/widget/dashboard_colors.dart';
 
-/// بطاقة المساعد الذكي — الواجهة الثانية في لوحة التحكم.
+/// بطاقة المساعد الذكي — متوافقة مع أسلوب بطاقات التطبيق.
 class DashboardAiAssistantCard extends StatelessWidget {
   const DashboardAiAssistantCard({
     super.key,
@@ -15,107 +15,110 @@ class DashboardAiAssistantCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: DashboardColors.aiCardBackground,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: DashboardColors.aiCardBorder,
-                width: 1,
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: DashboardColors.cardSurface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: DashboardColors.borderSubtle),
+        boxShadow: DashboardColors.cardShadow,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: AlignmentDirectional.topStart,
+                  end: AlignmentDirectional.bottomEnd,
+                  colors: [
+                    DashboardColors.primaryNavy,
+                    Color(0xFF1E3A5F),
+                  ],
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.smart_toy_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'dashboard_ai_title'.tr(),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 38),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          color: DashboardColors.aiIconBackground,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.smart_toy_rounded,
-                          color: Colors.white,
-                          size: 26,
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: DashboardColors.aiAccentSoft,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: DashboardColors.aiAccentBorder,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Text(
+                        'dashboard_ai_message'.tr(),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          height: 1.55,
+                          fontWeight: FontWeight.w500,
+                          color: DashboardColors.primaryNavy,
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(
-                          'dashboard_ai_title'.tr(),
-                          textAlign: TextAlign.start,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: DashboardColors.aiTitleColor,
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'dashboard_ai_message'.tr(),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      height: 1.55,
-                      fontWeight: FontWeight.w500,
-                      color: DashboardColors.aiBodyText,
                     ),
                   ),
-                  const SizedBox(height: 22),
-                  _SuggestionButton(
+                  const SizedBox(height: 14),
+                  _SuggestionChip(
                     label: 'dashboard_ai_btn_forecast'.tr(),
                     onTap: onForecastTap ?? () {},
                   ),
-                  const SizedBox(height: 12),
-                  _SuggestionButton(
+                  const SizedBox(height: 10),
+                  _SuggestionChip(
                     label: 'dashboard_ai_btn_risks'.tr(),
                     onTap: onRisksTap ?? () {},
                   ),
                 ],
               ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 12,
-            child: IgnorePointer(
-              child: Text(
-                'dashboard_ai_watermark'.tr(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 3,
-                  color: DashboardColors.aiWatermark.withValues(alpha: 0.2),
-                ),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SuggestionButton extends StatelessWidget {
-  const _SuggestionButton({
+class _SuggestionChip extends StatelessWidget {
+  const _SuggestionChip({
     required this.label,
     required this.onTap,
   });
@@ -125,38 +128,39 @@ class _SuggestionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: DashboardColors.cardSurface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: DashboardColors.aiButtonBorder,
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF0F172A).withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: DashboardColors.cardSurface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: DashboardColors.borderSubtle),
           ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-            child: Text(
-              label,
-              textAlign: TextAlign.start,
-              style: const TextStyle(
-                fontSize: 14.5,
-                fontWeight: FontWeight.w600,
-                color: DashboardColors.aiTitleColor,
-                height: 1.35,
-              ),
+            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: DashboardColors.primaryNavy,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 14,
+                  color: DashboardColors.linkText.withValues(alpha: 0.9),
+                ),
+              ],
             ),
           ),
         ),

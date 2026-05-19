@@ -171,6 +171,8 @@
   "inventory_adjustment_lines_heading": "Products",
   "inventory_adjustment_empty_lines": "No lines were returned for this adjustment.",
   "inventory_adjustment_id_label": "Inventory #{id}",
+  "inventory_detail_product_lookup_hint": "Product name or #",
+  "inventory_detail_product_lookup_empty": "No lines match this product.",
   "inventory_label_product_qty": "Counted quantity",
   "inventory_label_theoretical_qty": "Theoretical on hand",
   "inventory_label_difference": "Difference",

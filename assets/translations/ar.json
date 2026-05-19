@@ -171,6 +171,8 @@
   "inventory_adjustment_lines_heading": "الأصناف",
   "inventory_adjustment_empty_lines": "لم يُرجع الخادم أي أسطر لهذا التسوية.",
   "inventory_adjustment_id_label": "جرد رقم {id}",
+  "inventory_detail_product_lookup_hint": "اسم المنتج أو الرقم",
+  "inventory_detail_product_lookup_empty": "لا توجد أسطر مطابقة لهذا المنتج.",
   "inventory_label_product_qty": "الكمية المعدودة",
   "inventory_label_theoretical_qty": "الكمية النظرية",
   "inventory_label_difference": "الفرق",

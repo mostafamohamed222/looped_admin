@@ -321,6 +321,54 @@ class WarehouseTransferRepositoryImpl implements WarehouseTransferRepository {
   }
 
   @override
+  Future<void> deleteRequestLines({
+    required int requestOrderId,
+    required List<int> lineIds,
+  }) async {
+    final dynamic response = await _dio.post(
+      EndPoints.stockDeleteRequestLines,
+      body: <String, dynamic>{
+        'jsonrpc': '2.0',
+        'params': <String, dynamic>{
+          'request_order_id': requestOrderId,
+          'line_ids': lineIds,
+        },
+      },
+    );
+    _ensureActionRpcOk(
+      response,
+      invalidResponse: 'transfer_delete_lines_invalid_response',
+      missingResult: 'transfer_delete_lines_missing_result',
+      badStatus: 'transfer_delete_lines_bad_status',
+    );
+  }
+
+  @override
+  Future<void> updateRequestLine({
+    required int requestOrderId,
+    required int lineId,
+    required num quantity,
+  }) async {
+    final dynamic response = await _dio.post(
+      EndPoints.stockUpdateRequestLine,
+      body: <String, dynamic>{
+        'jsonrpc': '2.0',
+        'params': <String, dynamic>{
+          'request_order_id': requestOrderId,
+          'line_id': lineId,
+          'quantity': quantity,
+        },
+      },
+    );
+    _ensureActionRpcOk(
+      response,
+      invalidResponse: 'transfer_update_line_invalid_response',
+      missingResult: 'transfer_update_line_missing_result',
+      badStatus: 'transfer_update_line_bad_status',
+    );
+  }
+
+  @override
   Future<void> submitRequest({required int requestOrderId}) async {
     final dynamic response = await _dio.post(
       EndPoints.stockSubmitRequest,

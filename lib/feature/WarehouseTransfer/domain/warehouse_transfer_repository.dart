@@ -58,6 +58,19 @@ abstract class WarehouseTransferRepository {
     required List<Map<String, dynamic>> items,
   });
 
+  /// Remove lines from a draft request (`delete_request_lines`).
+  Future<void> deleteRequestLines({
+    required int requestOrderId,
+    required List<int> lineIds,
+  });
+
+  /// Update quantity on a draft request line (`update_request_line`).
+  Future<void> updateRequestLine({
+    required int requestOrderId,
+    required int lineId,
+    required num quantity,
+  });
+
   /// Routes available for a submitted request (`get_routes`).
   Future<List<StockRouteOption>> fetchRoutes({
     required int requestOrderId,

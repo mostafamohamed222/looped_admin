@@ -50,6 +50,8 @@ class _WarehouseTransferDetailScreenState
   String? _productsError;
   bool _linesWereUpdated = false;
   bool _transfersChanged = false;
+  final Set<int> _deletingLineIds = <int>{};
+  final Set<int> _updatingLineIds = <int>{};
   Map<String, double> _pendingProductQuantities = {};
   List<ProductOption> _pendingProducts = [];
 
@@ -101,6 +103,134 @@ class _WarehouseTransferDetailScreenState
       _pendingProductQuantities.remove(productId);
       _pendingProducts.removeWhere((p) => p.id == productId);
     });
+  }
+
+  Future<void> _confirmDeleteRequestLine(StockRequestLine line) async {
+    if (!_isDraft ||
+        line.id <= 0 ||
+        _isBusy ||
+        _deletingLineIds.contains(line.id)) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('transfer_delete_line_confirm_title'.tr()),
+          content: Text(
+            'transfer_delete_line_confirm_message'.tr(
+              namedArgs: {'name': line.productName},
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text('settings_logout_cancel'.tr()),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(
+                'transfer_delete_line'.tr(),
+                style: const TextStyle(color: InventoryColors.dangerText),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await _deleteRequestLine(line);
+  }
+
+  Future<void> _deleteRequestLine(StockRequestLine line) async {
+    if (!_isDraft || line.id <= 0 || _deletingLineIds.contains(line.id)) {
+      return;
+    }
+
+    setState(() => _deletingLineIds.add(line.id));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
+      await repo.deleteRequestLines(
+        requestOrderId: _detail.id,
+        lineIds: [line.id],
+      );
+      final updated =
+          await repo.fetchRequestDetails(requestOrderId: _detail.id);
+      if (!mounted) return;
+      setState(() {
+        _detail = updated;
+        _linesWereUpdated = true;
+        _deletingLineIds.remove(line.id);
+      });
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('transfer_delete_lines_success'.tr()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deletingLineIds.remove(line.id));
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_delete_lines_generic_error',
+      );
+    }
+  }
+
+  dynamic _quantityForApi(double qty) {
+    if (qty == qty.roundToDouble()) return qty.toInt();
+    return qty;
+  }
+
+  Future<void> _updateRequestLineQuantity(
+    StockRequestLine line,
+    double quantity,
+  ) async {
+    if (!_isDraft ||
+        line.id <= 0 ||
+        _isBusy ||
+        _updatingLineIds.contains(line.id)) {
+      return;
+    }
+
+    if (quantity <= 0) {
+      await _showTransferErrorDialog(
+        null,
+        fallbackKey: 'transfer_update_line_invalid_quantity',
+      );
+      if (mounted) setState(() {});
+      return;
+    }
+
+    if ((quantity - line.productUomQty).abs() < 0.0001) return;
+
+    setState(() => _updatingLineIds.add(line.id));
+    try {
+      final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
+      await repo.updateRequestLine(
+        requestOrderId: _detail.id,
+        lineId: line.id,
+        quantity: _quantityForApi(quantity),
+      );
+      final updated =
+          await repo.fetchRequestDetails(requestOrderId: _detail.id);
+      if (!mounted) return;
+      setState(() {
+        _detail = updated;
+        _linesWereUpdated = true;
+        _updatingLineIds.remove(line.id);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _updatingLineIds.remove(line.id));
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_update_line_generic_error',
+      );
+    }
   }
 
   bool get _isSubmitted {
@@ -200,7 +330,10 @@ class _WarehouseTransferDetailScreenState
     }
   }
 
-  bool get _isBusy => _actionLoading;
+  bool get _isBusy =>
+      _actionLoading ||
+      _deletingLineIds.isNotEmpty ||
+      _updatingLineIds.isNotEmpty;
 
   bool get _canSubmit => _detail.id > 0 && !_isBusy;
 
@@ -229,6 +362,217 @@ class _WarehouseTransferDetailScreenState
       if (inner.startsWith('transfer_')) return inner.tr();
     }
     return fallbackKey.tr();
+  }
+
+  String _errorMessageForDialog(String? raw, String fallbackKey) {
+    if (raw == null || raw.isEmpty) return fallbackKey.tr();
+    var trimmed = raw.replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    if (trimmed.startsWith('FormatException: ')) {
+      trimmed = trimmed.replaceFirst('FormatException: ', '').trim();
+    }
+    if (trimmed.startsWith('transfer_')) return trimmed.tr();
+    return trimmed;
+  }
+
+  Future<void> _showTransferErrorDialog(
+    Object? error, {
+    required String fallbackKey,
+  }) async {
+    if (!mounted) return;
+    final theme = Theme.of(context);
+    final message = _errorMessageForDialog(error?.toString(), fallbackKey);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: InventoryColors.primaryNavy.withValues(alpha: 0.45),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: InventoryColors.cardSurface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: InventoryColors.dangerText.withValues(alpha: 0.12),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: InventoryColors.primaryNavy.withValues(alpha: 0.12),
+                    blurRadius: 28,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+                      decoration: BoxDecoration(
+                        color: InventoryColors.dangerTint,
+                        border: Border(
+                          bottom: BorderSide(
+                            color: InventoryColors.dangerText
+                                .withValues(alpha: 0.1),
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: InventoryColors.cardSurface,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: InventoryColors.dangerText
+                                    .withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.error_outline_rounded,
+                              size: 22,
+                              color: InventoryColors.dangerText,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'transfer_error_dialog_title'.tr(),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: InventoryColors.primaryNavy,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () =>
+                                Navigator.of(dialogContext).pop(),
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 22,
+                              color: InventoryColors.subtitleGrey
+                                  .withValues(alpha: 0.85),
+                            ),
+                            tooltip: 'transfer_error_dialog_ok'.tr(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: InventoryColors.pageBackground,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: InventoryColors.borderSubtle,
+                            ),
+                          ),
+                          child: SelectableText(
+                            message,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: InventoryColors.primaryNavy,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(44),
+                                foregroundColor: InventoryColors.primaryNavy,
+                                backgroundColor: InventoryColors.cardSurface,
+                                side: const BorderSide(
+                                  color: InventoryColors.borderSubtle,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                              ),
+                              onPressed: () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: message),
+                                );
+                                if (!dialogContext.mounted) return;
+                                ScaffoldMessenger.of(dialogContext)
+                                    .showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'transfer_error_dialog_copied'.tr(),
+                                    ),
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.copy_rounded, size: 17),
+                              label: Text(
+                                'transfer_error_dialog_copy'.tr(),
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(44),
+                                backgroundColor: InventoryColors.primaryNavy,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                              ),
+                              onPressed: () =>
+                                  Navigator.of(dialogContext).pop(),
+                              child: Text(
+                                'transfer_error_dialog_ok'.tr(),
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _reloadDetailFromServer() async {
@@ -272,7 +616,6 @@ class _WarehouseTransferDetailScreenState
   Future<void> _onSubmit() async {
     if (!_canSubmit || _isOpen) return;
     setState(() => _actionLoading = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
       if (_isDraft && _pendingProductQuantities.isNotEmpty) {
@@ -304,11 +647,9 @@ class _WarehouseTransferDetailScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _actionLoading = false);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(_transferError(e.toString(), 'transfer_submit_generic_error')),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_submit_generic_error',
       );
     }
   }
@@ -320,11 +661,9 @@ class _WarehouseTransferDetailScreenState
     if (!_isDraft) return;
     final items = _buildAddLinesPayload(quantities);
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('transfer_add_lines_no_selection'.tr()),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await _showTransferErrorDialog(
+        null,
+        fallbackKey: 'transfer_add_lines_no_selection',
       );
       return;
     }
@@ -358,13 +697,9 @@ class _WarehouseTransferDetailScreenState
       if (sourceProducts != null) {
         _applyPendingSelection(quantities, sourceProducts);
       }
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            _transferError(e.toString(), 'transfer_add_lines_generic_error'),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_add_lines_generic_error',
       );
     }
   }
@@ -372,7 +707,6 @@ class _WarehouseTransferDetailScreenState
   Future<void> _onConfirm() async {
     if (!_canConfirm) return;
     setState(() => _actionLoading = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final repo = WarehouseTransferRepositoryImpl(dio: getIt<DioConsumer>());
       await repo.confirmRequest(requestOrderId: _detail.id);
@@ -381,13 +715,9 @@ class _WarehouseTransferDetailScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _actionLoading = false);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            _transferError(e.toString(), 'transfer_confirm_generic_error'),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_confirm_generic_error',
       );
     }
   }
@@ -487,13 +817,9 @@ class _WarehouseTransferDetailScreenState
     } catch (e) {
       if (!mounted) return;
       setState(() => _actionLoading = false);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            _transferError(e.toString(), 'transfer_set_route_generic_error'),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await _showTransferErrorDialog(
+        e,
+        fallbackKey: 'transfer_set_route_generic_error',
       );
     }
   }
@@ -705,17 +1031,6 @@ class _WarehouseTransferDetailScreenState
               ],
             ),
             const SizedBox(height: 12),
-            if (_isDraft) ...[
-              _DraftAddProductsBanner(
-                isLoading: _productsLoading,
-                errorMessage: _productsError,
-                pendingCount: _pendingProductQuantities.length,
-                onRetry: _loadProducts,
-                onAdd: _openAddProductsSheet,
-                enabled: _canOpenAddProducts,
-              ),
-              const SizedBox(height: 12),
-            ],
             if (_isDraft && _pendingProducts.isNotEmpty) ...[
               _DetailPendingProductsList(
                 theme: theme,
@@ -732,112 +1047,21 @@ class _WarehouseTransferDetailScreenState
               ..._detail.lines.map(
                 (line) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: _ProductLineTile(line: line),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DraftAddProductsBanner extends StatelessWidget {
-  const _DraftAddProductsBanner({
-    required this.isLoading,
-    required this.errorMessage,
-    required this.pendingCount,
-    required this.onRetry,
-    required this.onAdd,
-    required this.enabled,
-  });
-
-  final bool isLoading;
-  final String? errorMessage;
-  final int pendingCount;
-  final VoidCallback onRetry;
-  final VoidCallback onAdd;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    if (errorMessage != null) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: InventoryColors.dangerTint,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: InventoryColors.dangerText.withValues(alpha: 0.2),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              errorMessage!,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: InventoryColors.dangerText,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: Text('inventory_retry'.tr()),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Material(
-      color: InventoryColors.accentBlueSoft,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: enabled ? onAdd : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              if (isLoading)
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2.4),
-                )
-              else
-                const Icon(
-                  Icons.add_circle_outline_rounded,
-                  color: InventoryColors.accentBlue,
-                ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  pendingCount == 0
-                      ? 'transfer_detail_add_products'.tr()
-                      : 'transfer_products_selected_count'.tr(
-                          namedArgs: {'count': '$pendingCount'},
-                        ),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: InventoryColors.primaryNavy,
+                  child: _ProductLineTile(
+                    line: line,
+                    editable: _isDraft && line.id > 0,
+                    onQuantityCommit: _isDraft && line.id > 0 && !_isBusy
+                        ? (qty) => _updateRequestLineQuantity(line, qty)
+                        : null,
+                    onDelete: _isDraft && line.id > 0 && !_isBusy
+                        ? () => _confirmDeleteRequestLine(line)
+                        : null,
+                    isDeleting: _deletingLineIds.contains(line.id),
+                    isUpdating: _updatingLineIds.contains(line.id),
                   ),
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: InventoryColors.primaryNavy.withValues(alpha: 0.5),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -1864,14 +2088,73 @@ class _EmptyLinesPlaceholder extends StatelessWidget {
   }
 }
 
-class _ProductLineTile extends StatelessWidget {
-  const _ProductLineTile({required this.line});
+class _ProductLineTile extends StatefulWidget {
+  const _ProductLineTile({
+    required this.line,
+    this.editable = false,
+    this.onQuantityCommit,
+    this.onDelete,
+    this.isDeleting = false,
+    this.isUpdating = false,
+  });
 
   final StockRequestLine line;
+  final bool editable;
+  final Future<void> Function(double quantity)? onQuantityCommit;
+  final VoidCallback? onDelete;
+  final bool isDeleting;
+  final bool isUpdating;
+
+  @override
+  State<_ProductLineTile> createState() => _ProductLineTileState();
+}
+
+class _ProductLineTileState extends State<_ProductLineTile> {
+  late final TextEditingController _qtyController;
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyController =
+        TextEditingController(text: _formatQty(widget.line.productUomQty));
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProductLineTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.line.productUomQty != widget.line.productUomQty) {
+      _qtyController.text = _formatQty(widget.line.productUomQty);
+    }
+  }
+
+  @override
+  void dispose() {
+    _qtyController.dispose();
+    super.dispose();
+  }
+
+  double _parseQty(String raw) {
+    final normalized = raw.trim().replaceAll(',', '.');
+    if (normalized.isEmpty) return 0;
+    return double.tryParse(normalized) ?? 0;
+  }
+
+  Future<void> _commitQuantity() async {
+    if (widget.onQuantityCommit == null) return;
+    final parsed = _parseQty(_qtyController.text);
+    await widget.onQuantityCommit!(parsed);
+    if (!mounted) return;
+    if ((parsed - widget.line.productUomQty).abs() > 0.0001) {
+      _qtyController.text = _formatQty(widget.line.productUomQty);
+    }
+  }
+
+  bool get _lineBusy => widget.isDeleting || widget.isUpdating;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final line = widget.line;
     final qty = _formatQty(line.productUomQty);
     final uom = line.productUomName.isEmpty ? '—' : line.productUomName;
     final lineStateStyle = TransferStateStyle.forState(line.state);
@@ -1918,11 +2201,45 @@ class _ProductLineTile extends StatelessWidget {
                         style: lineStateStyle,
                       ),
                     ],
+                    if (widget.onDelete != null) ...[
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: widget.isDeleting
+                            ? const Padding(
+                                padding: EdgeInsets.all(6),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                ),
+                              )
+                            : IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'transfer_delete_line'.tr(),
+                                onPressed: _lineBusy ? null : widget.onDelete,
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 20,
+                                  color: InventoryColors.dangerText
+                                      .withValues(alpha: 0.9),
+                                ),
+                              ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
+                    Text(
+                      'transfer_label_quantity'.tr(),
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: InventoryColors.subtitleGrey,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Text(
                       uom,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1931,23 +2248,89 @@ class _ProductLineTile extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: InventoryColors.accentBlueSoft,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        qty,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: InventoryColors.accentBlue,
+                    if (widget.editable && widget.onQuantityCommit != null)
+                      SizedBox(
+                        width: 88,
+                        height: 36,
+                        child: widget.isUpdating
+                            ? const Center(
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
+                                  ),
+                                ),
+                              )
+                            : TextField(
+                                controller: _qtyController,
+                                enabled: !_lineBusy,
+                                textAlign: TextAlign.center,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9.,]'),
+                                  ),
+                                ],
+                                onEditingComplete: _commitQuantity,
+                                onSubmitted: (_) => _commitQuantity(),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: InventoryColors.primaryNavy,
+                                ),
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  filled: true,
+                                  fillColor: InventoryColors.accentBlueSoft,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 8,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide(
+                                      color: InventoryColors.accentBlue
+                                          .withValues(alpha: 0.35),
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide(
+                                      color: InventoryColors.accentBlue
+                                          .withValues(alpha: 0.35),
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: const BorderSide(
+                                      color: InventoryColors.accentBlue,
+                                      width: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: InventoryColors.accentBlueSoft,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          qty,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: InventoryColors.accentBlue,
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ],

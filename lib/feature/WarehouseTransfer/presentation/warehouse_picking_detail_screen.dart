@@ -354,7 +354,7 @@ class _PickingMoveLineTileState extends State<_PickingMoveLineTile> {
   @override
   void initState() {
     super.initState();
-    _qtyController = TextEditingController(text: _formatQty(widget.quantity));
+    _qtyController = TextEditingController(text: "0");
   }
 
   @override

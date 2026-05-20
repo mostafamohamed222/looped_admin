@@ -127,6 +127,10 @@ class EndPoints {
   static const String stockSubmitRequest = "/api/v1/stock/submit_request";
   static const String stockAddRequestLines =
       "/api/v1/stock/add_request_lines";
+  static const String stockDeleteRequestLines =
+      "/api/v1/stock/delete_request_lines";
+  static const String stockUpdateRequestLine =
+      "/api/v1/stock/update_request_line";
   static const String stockGetRoutes = "/api/v1/stock/get_routes";
   static const String stockSetRoute = "/api/v1/stock/set_route";
   static const String stockConfirmRequest = "/api/v1/stock/confirm_request";

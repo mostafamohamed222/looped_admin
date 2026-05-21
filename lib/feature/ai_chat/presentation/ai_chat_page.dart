@@ -5,8 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:looped_admin/core/res/color_manager.dart';
 import 'package:looped_admin/feature/ai_chat/data/ai_chat_service.dart';
+import 'package:looped_admin/feature/ai_chat/presentation/widgets/ai_report_web_view.dart';
 
 enum ChatMessageKind { userText, aiThinking, aiHtml }
+
+/// Vertical gap between consecutive chat rows.
+const double _kChatMessageGap = 4;
 
 class ChatMessage {
   ChatMessage._({required this.kind, this.text, this.html});
@@ -263,7 +267,7 @@ class _AiThinkingBubbleState extends State<_AiThinkingBubble>
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: _kChatMessageGap),
       child: Align(
         alignment: AlignmentDirectional.centerStart,
         child: DecoratedBox(
@@ -352,7 +356,24 @@ class _AiHtmlBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final maxBubbleWidth = MediaQuery.sizeOf(context).width * 0.88;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final listPadding = 32.0;
+    final reportWidth = screenWidth - listPadding;
+
+    if (isFullHtmlDocument(html)) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: _kChatMessageGap),
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: AiReportWebView(
+            html: html,
+            maxWidth: reportWidth,
+          ),
+        ),
+      );
+    }
+
+    final maxBubbleWidth = screenWidth * 0.88;
 
     final htmlContent = HtmlWidget(
       html,
@@ -379,7 +400,7 @@ class _AiHtmlBubble extends StatelessWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: _kChatMessageGap),
       child: Align(
         alignment: AlignmentDirectional.centerStart,
         child: DecoratedBox(
@@ -428,7 +449,7 @@ class _OutgoingBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: _kChatMessageGap),
       child: Align(
         alignment: AlignmentDirectional.centerEnd,
         child: DecoratedBox(

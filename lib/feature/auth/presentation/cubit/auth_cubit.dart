@@ -126,7 +126,7 @@ Future<String> _fetchDeviceIdentifier() async {
       '${EndPoints.firstBaseUrlDev}$domain${EndPoints.secondBaseUrlDev}',
     );
     try {
-      await addDeviceIdToHeaders();
+      // await addDeviceIdToHeaders();
       final response = await dioConsumer.post(
         EndPoints.login,
         body: {

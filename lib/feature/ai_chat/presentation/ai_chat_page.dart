@@ -1,28 +1,27 @@
 import 'dart:async';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:looped_admin/core/res/color_manager.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
+import 'package:looped_admin/feature/ai_chat/data/ai_chat_service.dart';
+
+enum ChatMessageKind { userText, aiThinking, aiHtml }
 
 class ChatMessage {
-  ChatMessage._({this.text, this.voiceDuration, this.voicePath})
-      : assert(text != null || voiceDuration != null);
+  ChatMessage._({required this.kind, this.text, this.html});
 
-  factory ChatMessage.text(String value) => ChatMessage._(text: value);
+  factory ChatMessage.userText(String value) =>
+      ChatMessage._(kind: ChatMessageKind.userText, text: value);
 
-  factory ChatMessage.voice({
-    required Duration duration,
-    String? path,
-  }) =>
-      ChatMessage._(voiceDuration: duration, voicePath: path);
+  ChatMessage.aiThinking() : this._(kind: ChatMessageKind.aiThinking);
 
+  factory ChatMessage.aiHtml(String value) =>
+      ChatMessage._(kind: ChatMessageKind.aiHtml, html: value);
+
+  final ChatMessageKind kind;
   final String? text;
-  final Duration? voiceDuration;
-  final String? voicePath;
+  final String? html;
 }
 
 class AiChatPage extends StatefulWidget {
@@ -35,43 +34,18 @@ class AiChatPage extends StatefulWidget {
 class _AiChatPageState extends State<AiChatPage> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final AudioRecorder _recorder = AudioRecorder();
-  final AudioPlayer _voicePlayer = AudioPlayer();
+  final AiChatService _chatService = AiChatService();
 
   final List<ChatMessage> _messages = [];
-
-  bool _isRecording = false;
-  DateTime? _recordStartedAt;
-  Timer? _recordingTicker;
-  int? _playingMessageIndex;
-  StreamSubscription<void>? _voiceCompleteSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _voiceCompleteSub = _voicePlayer.onPlayerComplete.listen((_) {
-      if (mounted) setState(() => _playingMessageIndex = null);
-    });
-  }
+  bool _isAwaitingAiReply = false;
+  int _replySeq = 0;
 
   @override
   void dispose() {
-    _voiceCompleteSub?.cancel();
-    unawaited(_voicePlayer.dispose());
-    _recordingTicker?.cancel();
+    _replySeq++;
     _textController.dispose();
     _scrollController.dispose();
-    unawaited(_disposeRecorder());
     super.dispose();
-  }
-
-  Future<void> _disposeRecorder() async {
-    try {
-      if (_isRecording) {
-        await _recorder.cancel();
-      }
-      await _recorder.dispose();
-    } catch (_) {}
   }
 
   void _scrollToBottom() {
@@ -85,133 +59,82 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
-  String _formatDuration(Duration d) {
-    final totalSeconds = d.inSeconds;
-    final m = totalSeconds ~/ 60;
-    final s = totalSeconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  void _removeThinkingIndicator() {
+    _messages.removeWhere((m) => m.kind == ChatMessageKind.aiThinking);
   }
 
-  Duration get _elapsedRecording {
-    final start = _recordStartedAt;
-    if (start == null) return Duration.zero;
-    return DateTime.now().difference(start);
-  }
-
-  Future<void> _startRecording() async {
-    if (kIsWeb) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ai_chat_voice_web_unsupported'.tr())),
-      );
-      return;
+  String _errorHtml(Object error) {
+    final isAr = context.locale.languageCode == 'ar';
+    final message = switch (error) {
+      FormatException(:final message) when message.startsWith('ai_chat_') =>
+        message.tr(),
+      Exception() =>
+        error.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''),
+      _ => 'ai_chat_error'.tr(),
+    };
+    final safe = message
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    if (isAr) {
+      return '''
+<div style="font-family: sans-serif; line-height: 1.5; color: #991b1b;">
+  <p><strong>تعذّر الحصول على رد</strong></p>
+  <p>$safe</p>
+</div>
+''';
     }
+    return '''
+<div style="font-family: sans-serif; line-height: 1.5; color: #991b1b;">
+  <p><strong>Could not get a reply</strong></p>
+  <p>$safe</p>
+</div>
+''';
+  }
+
+  Future<void> _fetchAiReply(String userText, int seq) async {
     try {
-      final permitted = await _recorder.hasPermission();
-      if (!permitted) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ai_chat_mic_denied'.tr())),
-        );
-        return;
-      }
-
-      var encoder = AudioEncoder.aacLc;
-      if (!await _recorder.isEncoderSupported(encoder)) {
-        encoder = AudioEncoder.wav;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final ext = encoder == AudioEncoder.wav ? 'wav' : 'm4a';
-      final path =
-          '${dir.path}/ai_chat_${DateTime.now().millisecondsSinceEpoch}.$ext';
-
-      await _recorder.start(RecordConfig(encoder: encoder), path: path);
-
-      if (!mounted) return;
+      final html = await _chatService.fetchHtmlReply(
+        text: userText,
+        language: context.locale.languageCode,
+      );
+      if (!mounted || seq != _replySeq) return;
       setState(() {
-        _isRecording = true;
-        _recordStartedAt = DateTime.now();
+        _removeThinkingIndicator();
+        _messages.add(ChatMessage.aiHtml(html));
+        _isAwaitingAiReply = false;
       });
-
-      _recordingTicker?.cancel();
-      _recordingTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() {});
+      _scrollToBottom();
+    } catch (error) {
+      if (!mounted || seq != _replySeq) return;
+      setState(() {
+        _removeThinkingIndicator();
+        _messages.add(ChatMessage.aiHtml(_errorHtml(error)));
+        _isAwaitingAiReply = false;
       });
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ai_chat_record_error'.tr())),
-      );
+      _scrollToBottom();
     }
   }
 
-  Future<void> _stopRecording() async {
-    if (!_isRecording) return;
-    _recordingTicker?.cancel();
-    final started = _recordStartedAt ?? DateTime.now();
-
-    String? filePath;
-    try {
-      filePath = await _recorder.stop();
-    } catch (_) {}
-
-    if (!mounted) return;
-    final duration = DateTime.now().difference(started);
+  void _beginAiReply(String userText) {
     setState(() {
-      _isRecording = false;
-      _recordStartedAt = null;
-      if (duration.inMilliseconds >= 400) {
-        _messages.add(ChatMessage.voice(duration: duration, path: filePath));
-      }
+      _messages.add(ChatMessage.aiThinking());
+      _isAwaitingAiReply = true;
     });
     _scrollToBottom();
-  }
-
-  Future<void> _toggleRecording() async {
-    if (_isRecording) {
-      await _stopRecording();
-    } else {
-      await _startRecording();
-    }
+    final seq = ++_replySeq;
+    unawaited(_fetchAiReply(userText, seq));
   }
 
   void _sendText() {
     final text = _textController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _isAwaitingAiReply) return;
     setState(() {
-      _messages.add(ChatMessage.text(text));
+      _messages.add(ChatMessage.userText(text));
       _textController.clear();
     });
     _scrollToBottom();
-  }
-
-  Future<void> _toggleVoicePlayback(int messageIndex, String path) async {
-    if (path.isEmpty) return;
-    if (kIsWeb) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ai_chat_playback_web_unsupported'.tr())),
-      );
-      return;
-    }
-    try {
-      if (_playingMessageIndex == messageIndex) {
-        await _voicePlayer.stop();
-        if (mounted) setState(() => _playingMessageIndex = null);
-        return;
-      }
-      await _voicePlayer.stop();
-      await _voicePlayer.play(DeviceFileSource(path));
-      if (!mounted) return;
-      setState(() => _playingMessageIndex = messageIndex);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _playingMessageIndex = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ai_chat_playback_error'.tr())),
-      );
-    }
+    _beginAiReply(text);
   }
 
   @override
@@ -248,20 +171,13 @@ class _AiChatPageState extends State<AiChatPage> {
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final m = _messages[index];
-                      final path = m.voicePath;
-                      final canPlayVoice =
-                          !kIsWeb && path != null && path.isNotEmpty;
-                      return _OutgoingBubble(
-                        message: m,
-                        formatDuration: _formatDuration,
-                        isVoicePlaying: _playingMessageIndex == index,
-                        canPlayVoice: canPlayVoice,
-                        onVoicePlayTap: canPlayVoice
-                            ? () => unawaited(
-                                  _toggleVoicePlayback(index, path),
-                                )
-                            : null,
-                      );
+                      if (m.kind == ChatMessageKind.aiThinking) {
+                        return const _AiThinkingBubble();
+                      }
+                      if (m.kind == ChatMessageKind.aiHtml) {
+                        return _AiHtmlBubble(html: m.html!);
+                      }
+                      return _OutgoingBubble(text: m.text!);
                     },
                   ),
           ),
@@ -271,74 +187,38 @@ class _AiChatPageState extends State<AiChatPage> {
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton(
-                      tooltip: _isRecording
-                          ? 'ai_chat_stop_recording'.tr()
-                          : 'ai_chat_start_recording'.tr(),
-                      onPressed: () => unawaited(_toggleRecording()),
-                      icon: Icon(
-                        _isRecording
-                            ? Icons.stop_rounded
-                            : Icons.mic_none_rounded,
-                        size: 26,
-                        color: _isRecording
-                            ? Colors.red.shade700
-                            : ColorManager.mainColor,
-                      ),
-                    ),
                     Expanded(
-                      child: _isRecording
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.fiber_manual_record,
-                                    size: 14,
-                                    color: Colors.red.shade600,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '${'ai_chat_recording'.tr()} · ${_formatDuration(_elapsedRecording)}',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                      color: ColorManager.mainColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : TextField(
-                              controller: _textController,
-                              minLines: 1,
-                              maxLines: 5,
-                              textInputAction: TextInputAction.newline,
-                              decoration: InputDecoration(
-                                hintText: 'ai_chat_input_hint'.tr(),
-                                filled: true,
-                                fillColor: ColorManager.backgroundColor,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(22),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
+                      child: TextField(
+                        controller: _textController,
+                        enabled: !_isAwaitingAiReply,
+                        minLines: 1,
+                        maxLines: 5,
+                        textInputAction: TextInputAction.newline,
+                        decoration: InputDecoration(
+                          hintText: 'ai_chat_input_hint'.tr(),
+                          filled: true,
+                          fillColor: ColorManager.backgroundColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(22),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
                     ),
                     IconButton(
                       tooltip: 'ai_chat_send'.tr(),
-                      onPressed: _isRecording ? null : _sendText,
+                      onPressed: _isAwaitingAiReply ? null : _sendText,
                       icon: Icon(
                         Icons.send_rounded,
-                        color: _isRecording
+                        color: _isAwaitingAiReply
                             ? ColorManager.grayTextColor
                             : ColorManager.mainColor,
                       ),
@@ -354,25 +234,199 @@ class _AiChatPageState extends State<AiChatPage> {
   }
 }
 
-class _OutgoingBubble extends StatelessWidget {
-  const _OutgoingBubble({
-    required this.message,
-    required this.formatDuration,
-    required this.isVoicePlaying,
-    required this.canPlayVoice,
-    this.onVoicePlayTap,
-  });
+class _AiThinkingBubble extends StatefulWidget {
+  const _AiThinkingBubble();
 
-  final ChatMessage message;
-  final String Function(Duration) formatDuration;
-  final bool isVoicePlaying;
-  final bool canPlayVoice;
-  final VoidCallback? onVoicePlayTap;
+  @override
+  State<_AiThinkingBubble> createState() => _AiThinkingBubbleState();
+}
+
+class _AiThinkingBubbleState extends State<_AiThinkingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isVoice = message.voiceDuration != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: ColorManager.whiteColor,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(18),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 18,
+                  color: ColorManager.mainColor.withValues(alpha: 0.85),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'ai_chat_thinking'.tr(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: ColorManager.mainColor.withValues(alpha: 0.9),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(3, (i) {
+                        final phase = (_controller.value + i * 0.2) % 1.0;
+                        final opacity = 0.35 + (phase < 0.5 ? phase : 1 - phase);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: Opacity(
+                            opacity: opacity.clamp(0.35, 1.0),
+                            child: Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: ColorManager.mainColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
+class _AiHtmlBubble extends StatelessWidget {
+  const _AiHtmlBubble({required this.html});
+
+  final String html;
+
+  static final RegExp _tableTagPattern = RegExp(
+    r'<table\b',
+    caseSensitive: false,
+  );
+
+  bool get _containsTable => _tableTagPattern.hasMatch(html);
+
+  @override
+  Widget build(BuildContext context) {
+    final maxBubbleWidth = MediaQuery.sizeOf(context).width * 0.88;
+
+    final htmlContent = HtmlWidget(
+      html,
+      textStyle: const TextStyle(
+        fontSize: 15,
+        height: 1.4,
+        color: ColorManager.mainColor,
+      ),
+      customStylesBuilder: (element) {
+        switch (element.localName) {
+          case 'table':
+            return {
+              'border-collapse': 'collapse',
+              'width': '100%',
+              'min-width': '280px',
+            };
+          case 'th':
+          case 'td':
+            return {'vertical-align': 'top'};
+          default:
+            return null;
+        }
+      },
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: ColorManager.whiteColor,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(18),
+              bottomRight: Radius.circular(18),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxBubbleWidth),
+              child: _containsTable
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minWidth: maxBubbleWidth),
+                        child: htmlContent,
+                      ),
+                    )
+                  : htmlContent,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OutgoingBubble extends StatelessWidget {
+  const _OutgoingBubble({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Align(
@@ -395,92 +449,19 @@ class _OutgoingBubble extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: const EdgeInsetsDirectional.only(
-              start: 6,
-              end: 10,
-              top: 6,
-              bottom: 6,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.sizeOf(context).width * 0.78,
               ),
-              child: isVoice
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: isVoicePlaying
-                              ? 'ai_chat_stop_voice'.tr()
-                              : 'ai_chat_play_voice'.tr(),
-                          onPressed: canPlayVoice ? onVoicePlayTap : null,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 40,
-                            minHeight: 40,
-                          ),
-                          icon: Icon(
-                            isVoicePlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: canPlayVoice
-                                ? ColorManager.whiteColor
-                                : ColorManager.whiteColor
-                                    .withValues(alpha: 0.45),
-                            size: 28,
-                          ),
-                        ),
-                        const Icon(
-                          Icons.graphic_eq_rounded,
-                          color: ColorManager.whiteColor,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'ai_chat_voice_label'.tr(),
-                                style: const TextStyle(
-                                  color: ColorManager.whiteColor,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                formatDuration(message.voiceDuration!),
-                                style: TextStyle(
-                                  color: ColorManager.whiteColor
-                                      .withValues(alpha: 0.92),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        message.text!,
-                        style: const TextStyle(
-                          color: ColorManager.whiteColor,
-                          fontSize: 15,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
+              child: Text(
+                text,
+                style: const TextStyle(
+                  color: ColorManager.whiteColor,
+                  fontSize: 15,
+                  height: 1.35,
+                ),
+              ),
             ),
           ),
         ),

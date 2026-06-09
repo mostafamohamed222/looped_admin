@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import 'package:looped_admin/core/data_scource/local/objectbox_database/objectbox_helper.dart';
+import 'package:looped_admin/core/data_scource/remote/dio_consumer.dart';
+import 'package:looped_admin/core/di/injection.dart';
 
 /// Sends user text to the AI backend and returns an HTML reply string.
 class AiChatService {
@@ -28,7 +31,46 @@ class AiChatService {
         return client;
       };
     }
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final sessionId = await _resolveOdooSessionId();
+          if (sessionId != null) {
+            options.headers['X-Odoo-Session-Id'] = sessionId;
+            print('X-Odoo-Session-Id: ${options.headers['X-Odoo-Session-Id']}');
+          }
+          handler.next(options);
+        },
+      ),
+    );
     return dio;
+  }
+
+  static String? _extractOdooSessionId(String session) {
+    final trimmed = session.trim();
+    if (trimmed.isEmpty) return null;
+    if (!trimmed.contains('=') && !trimmed.contains(';')) {
+      return trimmed;
+    }
+    const prefix = 'session_id=';
+    final lower = trimmed.toLowerCase();
+    final start = lower.indexOf(prefix);
+    if (start == -1) return null;
+    final valueStart = start + prefix.length;
+    final semicolon = trimmed.indexOf(';', valueStart);
+    final value = semicolon == -1
+        ? trimmed.substring(valueStart)
+        : trimmed.substring(valueStart, semicolon);
+    final id = value.trim();
+    return id.isEmpty ? null : id;
+  }
+
+  static Future<String?> _resolveOdooSessionId() async {
+    dynamic sessionRaw =
+        await getIt<ObjectBoxHelper>().get('userSessionId');
+    sessionRaw ??= getIt<DioConsumer>().client.options.headers['Cookie'];
+    if (sessionRaw == null) return null;
+    return _extractOdooSessionId('$sessionRaw');
   }
 
   Future<String> fetchHtmlReply({
@@ -82,7 +124,7 @@ class AiChatService {
       throw Exception(map['message']?.toString() ?? 'ai_chat_bad_status');
     }
 
-    final report = map['report'];
+    final report = map['chat_html'];
     if (report is String && report.trim().isNotEmpty) {
       return report.trim();
     }

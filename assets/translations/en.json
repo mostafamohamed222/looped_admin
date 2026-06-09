@@ -101,6 +101,7 @@
   "ai_chat_send": "Send",
   "ai_chat_thinking": "Thinking",
   "ai_chat_report_fullscreen": "View full report",
+  "ai_chat_report_tap_open": "Tap to view full report",
   "ai_chat_error": "Something went wrong while contacting the assistant. Please try again.",
   "ai_chat_invalid_response": "The server returned an unexpected response.",
   "ai_chat_missing_html": "The server response did not include a report.",

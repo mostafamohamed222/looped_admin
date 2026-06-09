@@ -71,6 +71,7 @@ dependencies:
   mobile_scanner: ^7.2.0
   flutter_widget_from_html: ^0.17.2
   webview_flutter: ^4.13.0
+  pointer_interceptor: ^0.10.1+2
 dev_dependencies:
   flutter_test:
     sdk: flutter

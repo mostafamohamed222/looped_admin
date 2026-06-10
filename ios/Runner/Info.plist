@@ -43,6 +43,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is used to scan product barcodes during inventory count.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is used to send voice messages to the AI assistant.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

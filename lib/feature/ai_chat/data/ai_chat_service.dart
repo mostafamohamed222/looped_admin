@@ -8,6 +8,14 @@ import 'package:looped_admin/core/data_scource/local/objectbox_database/objectbo
 import 'package:looped_admin/core/data_scource/remote/dio_consumer.dart';
 import 'package:looped_admin/core/di/injection.dart';
 
+/// AI chat reply with optional session id for follow-up messages.
+class AiChatReply {
+  const AiChatReply({required this.html, this.sessionId});
+
+  final String html;
+  final String? sessionId;
+}
+
 /// Sends user text to the AI backend and returns an HTML reply string.
 class AiChatService {
   static const String chatUrl = 'http://89.117.60.212:8001/chat';
@@ -73,17 +81,42 @@ class AiChatService {
     return _extractOdooSessionId('$sessionRaw');
   }
 
-  Future<String> fetchHtmlReply({
-    required String text,
+  Future<AiChatReply> fetchHtmlReply({
+    String? text,
+    File? audioFile,
     required String language,
+    String? sessionId,
   }) async {
-    final formData = FormData.fromMap(<String, dynamic>{
-      'text': text,
+    final trimmedText = text?.trim() ?? '';
+    if (trimmedText.isEmpty && audioFile == null) {
+      throw ArgumentError('text or audioFile is required');
+    }
+
+    final fields = <String, dynamic>{
       'language': language == 'en' ? 'en' : 'ar',
-    });
+    };
+    final trimmedSessionId = sessionId?.trim();
+    if (trimmedSessionId != null && trimmedSessionId.isNotEmpty) {
+      fields['session_id'] = trimmedSessionId;
+    }
+    if (trimmedText.isNotEmpty) {
+      fields['text'] = trimmedText;
+    }
+    if (audioFile != null) {
+      final name = audioFile.path.split(Platform.pathSeparator).last;
+      fields['file'] = await MultipartFile.fromFile(
+        audioFile.path,
+        filename: name.isNotEmpty ? name : 'recording.m4a',
+      );
+    }
+
+    final formData = FormData.fromMap(fields);
 
     late final Response<dynamic> response;
     try {
+      print('formData: ${fields['file']}');
+      print('formData: ${fields['session_id']}');
+      
       response = await _dio.post<dynamic>(
         chatUrl,
         data: formData,
@@ -92,7 +125,9 @@ class AiChatService {
           sendTimeout: const Duration(minutes: 2),
         ),
       );
+      print('response: $response');
     } on DioException catch (e) {
+      print('error: $e');
       throw _toUserFacingError(e);
     }
 
@@ -124,14 +159,26 @@ class AiChatService {
       throw Exception(map['message']?.toString() ?? 'ai_chat_bad_status');
     }
 
-    final report = map['chat_html'];
+    final responseSessionId = map['session_id']?.toString().trim();
+    final sessionIdFromResponse =
+        responseSessionId != null && responseSessionId.isNotEmpty
+            ? responseSessionId
+            : null;
+
+    final report = map['report'];
     if (report is String && report.trim().isNotEmpty) {
-      return report.trim();
+      return AiChatReply(
+        html: report.trim(),
+        sessionId: sessionIdFromResponse,
+      );
     }
 
     final fallback = map['html'] ?? map['message'] ?? map['reply'];
     if (fallback is String && fallback.trim().isNotEmpty) {
-      return fallback.trim();
+      return AiChatReply(
+        html: fallback.trim(),
+        sessionId: sessionIdFromResponse,
+      );
     }
 
     throw const FormatException('ai_chat_missing_html');

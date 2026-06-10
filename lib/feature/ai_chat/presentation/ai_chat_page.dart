@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
@@ -68,18 +69,35 @@ class _AiChatPageState extends State<AiChatPage> {
   String? _chatSessionId;
   bool _isAwaitingAiReply = false;
   bool _isRecording = false;
+  bool _isRecordingBusy = false;
   Duration _recordingElapsed = Duration.zero;
   String? _playingAudioPath;
   int _replySeq = 0;
   Timer? _recordingTimer;
   StreamSubscription<PlayerState>? _playerStateSub;
+  StreamSubscription<RecordState>? _recordStateSub;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_audioPlayer.setVolume(1.0));
     _playerStateSub = _audioPlayer.playerStateStream.listen((state) {
-      if (state.processingState == ProcessingState.completed && mounted) {
-        setState(() => _playingAudioPath = null);
+      if (!mounted) return;
+      setState(() {
+        if (state.processingState == ProcessingState.completed ||
+            state.processingState == ProcessingState.idle) {
+          _playingAudioPath = null;
+        }
+      });
+    });
+    _recordStateSub = _audioRecorder.onStateChanged().listen((state) {
+      if (!mounted) return;
+      final recording = state == RecordState.record;
+      if (recording == _isRecording) return;
+      setState(() => _isRecording = recording);
+      if (!recording) {
+        _recordingTimer?.cancel();
+        _recordingTimer = null;
       }
     });
   }
@@ -89,6 +107,7 @@ class _AiChatPageState extends State<AiChatPage> {
     _replySeq++;
     _recordingTimer?.cancel();
     _playerStateSub?.cancel();
+    _recordStateSub?.cancel();
     _audioRecorder.dispose();
     unawaited(_audioPlayer.dispose());
     _textController.dispose();
@@ -191,9 +210,83 @@ class _AiChatPageState extends State<AiChatPage> {
     );
   }
 
+  void _showSnack(String messageKey) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(messageKey.tr())),
+    );
+  }
+
+  Future<void> _configureRecordingSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(
+      const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.defaultToSpeaker,
+        avAudioSessionMode: AVAudioSessionMode.spokenAudio,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      ),
+    );
+    await session.setActive(true);
+  }
+
+  Future<void> _configurePlaybackSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(
+      const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playback,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.defaultToSpeaker,
+        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.music,
+          usage: AndroidAudioUsage.media,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      ),
+    );
+    await session.setActive(true);
+    await _routeAudioToSpeaker();
+  }
+
+  Future<void> _routeAudioToSpeaker() async {
+    if (!Platform.isIOS) return;
+    await AVAudioSession().overrideOutputAudioPort(
+      AVAudioSessionPortOverride.speaker,
+    );
+  }
+
+  Future<void> _stopAudioPlayback() async {
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+    if (mounted && _playingAudioPath != null) {
+      setState(() => _playingAudioPath = null);
+    }
+  }
+
+  Future<String> _persistVoiceFile(String tempPath) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final voiceDir = Directory('${dir.path}/ai_chat_voice');
+    if (!voiceDir.existsSync()) {
+      voiceDir.createSync(recursive: true);
+    }
+    final destPath =
+        '${voiceDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await File(tempPath).copy(destPath);
+    return destPath;
+  }
+
   void _sendText() {
     final text = _textController.text.trim();
-    if (text.isEmpty || _isAwaitingAiReply || _isRecording) return;
+    if (text.isEmpty || _isAwaitingAiReply || _isRecording) {
+      return;
+    }
     setState(() {
       _messages.add(ChatMessage.userText(text));
       _textController.clear();
@@ -203,93 +296,156 @@ class _AiChatPageState extends State<AiChatPage> {
   }
 
   Future<void> _toggleRecording() async {
-    if (_isAwaitingAiReply) return;
+    if (_isAwaitingAiReply || _isRecordingBusy) return;
 
-    if (_isRecording) {
+    if (_isRecording || await _audioRecorder.isRecording()) {
       await _stopRecordingAndSend();
       return;
     }
 
-    final hasPermission = await _audioRecorder.hasPermission();
-    if (!hasPermission) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ai_chat_mic_denied'.tr())),
+    await _startRecording();
+  }
+
+  Future<void> _startRecording() async {
+    if (_isAwaitingAiReply || _isRecordingBusy || _isRecording) return;
+
+    _isRecordingBusy = true;
+    try {
+      await _stopAudioPlayback();
+      await _configureRecordingSession();
+
+      if (await _audioRecorder.isRecording()) {
+        await _audioRecorder.stop();
+      }
+
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        if (mounted) _showSnack('ai_chat_mic_denied');
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/ai_chat_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      await _audioRecorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc, numChannels: 1),
+        path: path,
       );
-      return;
+
+      _recordingTimer?.cancel();
+      _recordingElapsed = Duration.zero;
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() => _recordingElapsed += const Duration(seconds: 1));
+      });
+
+      if (mounted) {
+        setState(() => _isRecording = true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _recordingElapsed = Duration.zero;
+        });
+        _showSnack('ai_chat_record_failed');
+      }
+    } finally {
+      _isRecordingBusy = false;
     }
-
-    final dir = await getTemporaryDirectory();
-    final path =
-        '${dir.path}/ai_chat_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-    await _audioRecorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc),
-      path: path,
-    );
-
-    _recordingTimer?.cancel();
-    _recordingElapsed = Duration.zero;
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() => _recordingElapsed += const Duration(seconds: 1));
-    });
-
-    setState(() => _isRecording = true);
   }
 
   Future<void> _stopRecordingAndSend() async {
-    _recordingTimer?.cancel();
-    _recordingTimer = null;
+    if (_isRecordingBusy) return;
+    if (!_isRecording && !await _audioRecorder.isRecording()) return;
 
-    final path = await _audioRecorder.stop();
-    final recordingPath = path;
-    final elapsed = _recordingElapsed;
+    _isRecordingBusy = true;
+    try {
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+      final elapsed = _recordingElapsed;
 
-    setState(() {
-      _isRecording = false;
-      _recordingElapsed = Duration.zero;
-    });
-
-    if (recordingPath == null || !File(recordingPath).existsSync()) return;
-
-    Duration duration = elapsed;
-    if (duration == Duration.zero) {
-      final probe = AudioPlayer();
-      try {
-        await probe.setFilePath(recordingPath);
-        duration = probe.duration ?? Duration.zero;
-      } finally {
-        await probe.dispose();
+      String? recordingPath;
+      if (await _audioRecorder.isRecording()) {
+        recordingPath = await _audioRecorder.stop();
       }
-    }
 
-    setState(() {
-      _messages.add(
-        ChatMessage.userAudio(path: recordingPath, duration: duration),
-      );
-    });
-    _scrollToBottom();
-    _beginAiReply(audioFile: File(recordingPath));
+      if (!mounted) return;
+
+      setState(() {
+        _isRecording = false;
+        _recordingElapsed = Duration.zero;
+      });
+
+      if (recordingPath == null || !File(recordingPath).existsSync()) {
+        _showSnack('ai_chat_record_failed');
+        return;
+      }
+
+      final savedPath = await _persistVoiceFile(recordingPath);
+      final duration = elapsed == Duration.zero
+          ? const Duration(seconds: 1)
+          : elapsed;
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages.add(
+          ChatMessage.userAudio(path: savedPath, duration: duration),
+        );
+      });
+      _scrollToBottom();
+      _beginAiReply(audioFile: File(savedPath));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _recordingElapsed = Duration.zero;
+        });
+        _showSnack('ai_chat_record_failed');
+      }
+    } finally {
+      _isRecordingBusy = false;
+    }
   }
 
   Future<void> _toggleAudioPlayback(String path) async {
-    if (_playingAudioPath == path && _audioPlayer.playing) {
-      await _audioPlayer.pause();
-      setState(() => _playingAudioPath = null);
+    if (_isRecording) return;
+
+    if (!File(path).existsSync()) {
+      _showSnack('ai_chat_playback_failed');
       return;
     }
 
-    if (_playingAudioPath == path && !_audioPlayer.playing) {
+    try {
+      await _configurePlaybackSession();
+      await _audioPlayer.setVolume(1.0);
+
+      if (_playingAudioPath == path && _audioPlayer.playing) {
+        await _audioPlayer.pause();
+        if (mounted) setState(() => _playingAudioPath = null);
+        return;
+      }
+
+      if (_playingAudioPath == path && !_audioPlayer.playing) {
+        await _routeAudioToSpeaker();
+        await _audioPlayer.play();
+        if (mounted) setState(() => _playingAudioPath = path);
+        return;
+      }
+
+      await _audioPlayer.stop();
+      await _audioPlayer.setAudioSource(AudioSource.file(path));
+      await _routeAudioToSpeaker();
       await _audioPlayer.play();
-      setState(() => _playingAudioPath = path);
-      return;
+      if (mounted) setState(() => _playingAudioPath = path);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _playingAudioPath = null);
+        _showSnack('ai_chat_playback_failed');
+      }
     }
-
-    await _audioPlayer.stop();
-    await _audioPlayer.setFilePath(path);
-    await _audioPlayer.play();
-    setState(() => _playingAudioPath = path);
   }
 
   @override
@@ -361,13 +517,14 @@ class _AiChatPageState extends State<AiChatPage> {
                       tooltip: _isRecording
                           ? 'ai_chat_stop_record'.tr()
                           : 'ai_chat_record'.tr(),
-                      onPressed:
-                          _isAwaitingAiReply ? null : () => unawaited(_toggleRecording()),
+                      onPressed: _isAwaitingAiReply || _isRecordingBusy
+                          ? null
+                          : () => unawaited(_toggleRecording()),
                       icon: Icon(
                         _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
                         color: _isRecording
                             ? Colors.red
-                            : (_isAwaitingAiReply
+                            : (_isAwaitingAiReply || _isRecordingBusy
                                 ? ColorManager.grayTextColor
                                 : ColorManager.mainColor),
                       ),
@@ -426,7 +583,7 @@ class _AiChatPageState extends State<AiChatPage> {
                           (_isAwaitingAiReply || _isRecording) ? null : _sendText,
                       icon: Icon(
                         Icons.send_rounded,
-                        color: _isAwaitingAiReply
+                        color: (_isAwaitingAiReply || _isRecording)
                             ? ColorManager.grayTextColor
                             : ColorManager.mainColor,
                       ),
@@ -683,55 +840,68 @@ class _OutgoingAudioBubble extends StatelessWidget {
               ),
             ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.sizeOf(context).width * 0.72,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(18),
+                bottomRight: Radius.circular(4),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Material(
-                    color: ColorManager.whiteColor.withValues(alpha: 0.2),
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: onTogglePlay,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Icon(
-                          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                          color: ColorManager.whiteColor,
-                          size: 24,
-                        ),
-                      ),
-                    ),
+              onTap: onTogglePlay,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.sizeOf(context).width * 0.72,
                   ),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        'ai_chat_voice_message'.tr(),
-                        style: const TextStyle(
-                          color: ColorManager.whiteColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: ColorManager.whiteColor.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            color: ColorManager.whiteColor,
+                            size: 24,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        formatDuration(duration),
-                        style: TextStyle(
-                          color: ColorManager.whiteColor.withValues(alpha: 0.85),
-                          fontSize: 12,
-                        ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'ai_chat_voice_message'.tr(),
+                            style: const TextStyle(
+                              color: ColorManager.whiteColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            formatDuration(duration),
+                            style: TextStyle(
+                              color:
+                                  ColorManager.whiteColor.withValues(alpha: 0.85),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

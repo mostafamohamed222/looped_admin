@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:easy_localization/easy_localization.dart' hide TextDirection;
 import 'package:flutter/material.dart';
 import 'package:looped_admin/core/res/color_manager.dart';
@@ -10,18 +13,24 @@ class ProfileSettingsCard extends StatelessWidget {
     required this.fullNameController,
     required this.emailController,
     required this.phoneController,
-    required this.jobTitleController,
     required this.onSave,
     required this.onEditPhoto,
+    this.imageUrl,
+    this.localImageBytes,
+    this.isSaving = false,
+    this.isSavingImage = false,
   });
 
   final String displayName;
   final TextEditingController fullNameController;
   final TextEditingController emailController;
   final TextEditingController phoneController;
-  final TextEditingController jobTitleController;
   final VoidCallback onSave;
   final VoidCallback onEditPhoto;
+  final String? imageUrl;
+  final Uint8List? localImageBytes;
+  final bool isSaving;
+  final bool isSavingImage;
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +44,12 @@ class ProfileSettingsCard extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
         child: Column(
           children: [
-            _ProfileAvatarWithEdit(onEditPhoto: onEditPhoto),
+            _ProfileAvatarWithEdit(
+              imageUrl: imageUrl,
+              localImageBytes: localImageBytes,
+              isSavingImage: isSavingImage,
+              onEditPhoto: isSavingImage ? () {} : onEditPhoto,
+            ),
             const SizedBox(height: 16),
             Text(
               displayName,
@@ -84,18 +98,11 @@ class ProfileSettingsCard extends StatelessWidget {
               keyboardType: TextInputType.phone,
               textAlign: TextAlign.right,
             ),
-            const SizedBox(height: 16),
-            _ProfileLabeledField(
-              label: 'profile_field_job_title'.tr(),
-              controller: jobTitleController,
-              keyboardType: TextInputType.text,
-              textAlign: TextAlign.right,
-            ),
             const SizedBox(height: 28),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(
-                onPressed: onSave,
+                onPressed: isSaving ? null : onSave,
                 style: FilledButton.styleFrom(
                   backgroundColor: AccountSettingsColors.navy,
                   foregroundColor: ColorManager.whiteColor,
@@ -108,13 +115,22 @@ class ProfileSettingsCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: Text(
-                  'profile_save_changes'.tr(),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: isSaving
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: ColorManager.whiteColor,
+                        ),
+                      )
+                    : Text(
+                        'profile_save_changes'.tr(),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -156,9 +172,17 @@ class _ProfileBadge extends StatelessWidget {
 }
 
 class _ProfileAvatarWithEdit extends StatelessWidget {
-  const _ProfileAvatarWithEdit({required this.onEditPhoto});
+  const _ProfileAvatarWithEdit({
+    required this.onEditPhoto,
+    this.imageUrl,
+    this.localImageBytes,
+    this.isSavingImage = false,
+  });
 
   final VoidCallback onEditPhoto;
+  final String? imageUrl;
+  final Uint8List? localImageBytes;
+  final bool isSavingImage;
 
   @override
   Widget build(BuildContext context) {
@@ -180,12 +204,28 @@ class _ProfileAvatarWithEdit extends StatelessWidget {
               ),
               color: const Color(0xFFF8FAFC),
             ),
-            child: const Icon(
-              Icons.person_rounded,
-              size: 52,
-              color: Color(0xFF94A3B8),
-            ),
+            clipBehavior: Clip.antiAlias,
+            child: _buildAvatarContent(),
           ),
+          if (isSavingImage)
+            Container(
+              width: 104,
+              height: 104,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withValues(alpha: 0.35),
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: ColorManager.whiteColor,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             bottom: 0,
             left: 0,
@@ -194,7 +234,7 @@ class _ProfileAvatarWithEdit extends StatelessWidget {
               shape: const CircleBorder(),
               elevation: 2,
               child: InkWell(
-                onTap: onEditPhoto,
+                onTap: isSavingImage ? null : onEditPhoto,
                 customBorder: const CircleBorder(),
                 child: const SizedBox(
                   width: 36,
@@ -210,6 +250,38 @@ class _ProfileAvatarWithEdit extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAvatarContent() {
+    if (localImageBytes != null && localImageBytes!.isNotEmpty) {
+      return Image.memory(
+        localImageBytes!,
+        fit: BoxFit.cover,
+        width: 104,
+        height: 104,
+      );
+    }
+
+    final url = imageUrl?.trim() ?? '';
+    if (url.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        width: 104,
+        height: 104,
+        errorWidget: (_, _, _) => const Icon(
+          Icons.person_rounded,
+          size: 52,
+          color: Color(0xFF94A3B8),
+        ),
+      );
+    }
+
+    return const Icon(
+      Icons.person_rounded,
+      size: 52,
+      color: Color(0xFF94A3B8),
     );
   }
 }

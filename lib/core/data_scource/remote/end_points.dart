@@ -139,4 +139,7 @@ class EndPoints {
   static const String stockGetTransferDetails =
       "/api/v1/get_transfer_details";
   static const String stockProcessTransfer = "/api/v1/process_transfer";
+
+  static const String profileGet = "/api/v1/profile/get";
+  static const String profileUpdate = "/api/v1/profile/update";
 }

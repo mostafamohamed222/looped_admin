@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:looped_admin/core/res/color_manager.dart';
 import 'package:looped_admin/feature/auth/widget/login_locale_button.dart';
 import 'package:looped_admin/feature/auth/widget/looped_wordmark.dart';
 
@@ -15,16 +16,13 @@ class LoginHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         const Flexible(
-          child: Align(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: LoopedWordmark(),
-            ),
+            child: Text('Looped', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: ColorManager.blackColor, letterSpacing: 0.2),),
           ),
         ),
         const SizedBox(width: 8),

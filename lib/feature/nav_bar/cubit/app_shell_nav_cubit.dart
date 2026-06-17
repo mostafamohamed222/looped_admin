@@ -2,7 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 /// يتحكم في تبويب الشريط السفلي داخل [AppShellPage].
 class AppShellNavCubit extends Cubit<int> {
-  AppShellNavCubit() : super(0);
+  AppShellNavCubit() : super(dashboardTab);
 
   static const int settingsTab = 0;
   static const int requestsTab = 1;
